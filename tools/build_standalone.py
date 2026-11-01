@@ -37,6 +37,9 @@ for suffix,key in [('audio.worklet.js','__diceboundAudio'),('audio.position.work
 engine=(web/'index.js').read_text()
 engine=engine.replace('return `${loadPath}.audio.worklet.js`;', 'return window.__diceboundAudio;').replace('return `${loadPath}.audio.position.worklet.js`;', 'return window.__diceboundAudioPosition;')
 html=(web/'index.html').read_text()
+version_match = re.search(r'config/version="([^\"]+)"', (Path(__file__).resolve().parents[1]/'project.godot').read_text())
+version = version_match.group(1) if version_match else "0.1.0"
+html=html.replace('<head>', '<head>\n<meta name="application-version" content="'+version+'">')
 html=html.replace('<script src="index.js"></script>', '<script>'+bootstrap.replace('</script','<\\/script')+'\n'+engine.replace('</script','<\\/script')+'</script>')
 assert '<script src="index.js">' not in html
 for name in ['index.png','index.icon.png','index.apple-touch-icon.png']:

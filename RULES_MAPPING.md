@@ -39,3 +39,7 @@ The extended hero catalogue, Channel/Constant abilities, Numeric manipulation, c
 ## Validation limits
 
 The native Linux executable and browser export were run. Windows was exported from the same validated project but could not be executed on this Linux machine. Automated battle tests exercise wins, losses, and recovery but are not a human balance study. Original prototype values are deliberately preserved.
+
+## v0.2 presentation changes
+
+UI labels Step, Tactical Dash and Guard are short display names for Basic Movement, Tactical Movement and Basic Defense respectively; full catalogue names remain in tooltips and the builder details. Effects and costs are unchanged. Free selection/cancellation previews do not resolve or spend a result. The explicit confirmation for immediate effects is UI only. Presets allocate owned faces; moving a unique equipped face swaps the previous target side back to its original location and passes normal construction validation.

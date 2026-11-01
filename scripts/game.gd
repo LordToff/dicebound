@@ -64,6 +64,13 @@ var anim_lock = false
 var effects: Array = []
 var roll_anim = 0.0
 var save_enabled = true
+var build_slot = 0
+var armed_die = -1
+var end_confirm = false
+var hurt_timers = {}
+const POWER = ["NO ACTION", "1 DAMAGE", "MOVE 1", "MOVE 3", "+1 BLOCK", "BLOCK + STEP", "REROLL 1", "+1 HP", "PUSH 1"]
+const SHORT_NAMES = ["Blank", "Basic Strike", "Step", "Tactical Dash", "Guard", "Tactical Defense", "Focus", "First Aid", "Shove"]
+const BOSS_TIPS = {"Advance":"Move up to 2 toward the closest hero.", "Skirmish":"Move 1, then attack an adjacent hero for 1.", "Strike":"2 damage to the closest adjacent hero.", "Sweep":"1 damage to EVERY adjacent hero, including Downed.", "Brace":"Gain 2 Block until the next boss turn.", "Drive Back":"1 damage, then push 1. Collisions deal 1 + Stunned.", "Distort":"Closest hero within 2: Weakness 1 until boss next turn.", "Fracture":"An adjacent hero chooses an ability face to lose temporarily."}
 
 func _ready() -> void:
 	font = load("res://assets/pixel-mono.ttf")
@@ -76,8 +83,9 @@ func _ready() -> void:
 	add_child(audio)
 	music = AudioStreamPlayer.new()
 	add_child(music)
-	music.volume_db = -22
-	music.stream = make_music()
+	music.volume_db = -12
+	music.stream = load("res://assets/tribunal.ogg")
+	music.stream.loop = true
 	music.play()
 	set_process(true)
 	queue_redraw()
@@ -103,26 +111,6 @@ func save_progress() -> void:
 	config.set_value("party", "wins", battles_won)
 	config.save("user://dicebound.cfg")
 
-func make_music() -> AudioStreamWAV:
-	var wav = AudioStreamWAV.new()
-	wav.format = AudioStreamWAV.FORMAT_16_BITS
-	wav.mix_rate = 22050
-	wav.loop_mode = AudioStreamWAV.LOOP_FORWARD
-	var data = PackedByteArray()
-	var notes = [55.0, 65.406, 73.416, 61.735]
-	var n = 22050 * 8
-	data.resize(n * 2)
-	for i in range(n):
-		var t = float(i) / 22050.0
-		var freq: float = notes[int(t / 2.0) % 4]
-		var envelope = 0.5 + 0.5 * sin(t * PI * 0.5)
-		var v = sin(TAU * freq * t) * 0.24 + sin(TAU * freq * 1.5 * t) * 0.08
-		v += (1.0 if fmod(t * freq * 2, 1) < 0.5 else -1.0) * 0.025 * envelope
-		data.encode_s16(i * 2, int(v * 16000))
-	wav.data = data
-	wav.loop_end = n
-	return wav
-
 func sfx(kind: String) -> void:
 	if not sound_on:
 		return
@@ -134,8 +122,12 @@ func sfx(kind: String) -> void:
 	data.resize(n * 2)
 	for i in range(n):
 		var t = float(i) / 22050.0
-		var f = 180.0 - t * 600 if kind == "hit" else (520.0 + t * 1800 if kind == "heal" else 330.0 + t * 800)
-		var v = (1.0 if sin(TAU * f * t) > 0 else -1.0) * pow(1.0 - float(i) / n, 2) * 0.18
+		var frequencies = {"hit": 110.0, "heal": 660.0, "block": 270.0, "step": 150.0, "roll": 420.0, "carve": 880.0}
+		var base: float = frequencies.get(kind, 330.0)
+		var f = base * (1.0 - t * 3.0) if kind in ["hit", "step"] else base * (1.0 + t * 2.0)
+		var wave_value = sin(TAU * f * t) + 0.35 * sin(TAU * f * 1.5 * t)
+		if kind == "hit": wave_value += sin(i * 713.7) * 0.7
+		var v = wave_value * pow(1.0 - float(i) / n, 2) * 0.20
 		data.encode_s16(i * 2, int(v * 22000))
 	wav.data = data
 	audio.stream = wav
@@ -143,6 +135,7 @@ func sfx(kind: String) -> void:
 
 func _process(delta: float) -> void:
 	time += delta
+	for h in hurt_timers.keys(): hurt_timers[h] = maxf(0.0, hurt_timers[h] - delta)
 	toast_time = maxf(0, toast_time - delta)
 	shake = maxf(0, shake - delta * 32)
 	flash = maxf(0, flash - delta * 3)
@@ -213,25 +206,30 @@ func _draw() -> void:
 		draw_result()
 	if screen != "title":
 		button(Rect2(1100, 27, 64, 30), "RULES", "help", true, MUTED)
-	button(Rect2(1176, 27, 74, 30), "SFX ON" if sound_on else "MUTED", "sound", true, MUTED)
+	button(Rect2(1176, 27, 74, 30), "SOUND" if sound_on else "MUTED", "sound", true, MUTED, "Toggle the soundtrack and sound effects.")
 	if toast_time > 0:
 		box(Rect2(200, 744, 880, 36), Color("302b31"), GOLD)
 		text_at(Vector2(218, 768), toast, 14, GOLD)
 	if help_open:
 		draw_help()
-	if not hover_tip.is_empty() and not help_open:
-		box(Rect2(66, 716, 1148, 24), Color("111827"), EDGE)
-		text_at(Vector2(77, 733), hover_tip, 13, INK)
+	if not hover_tip.is_empty() and not help_open and (screen != "build" or toast_time <= 0):
+		var tip_y = 744 if screen == "build" else 716
+		box(Rect2(66, tip_y, 1148, 24), Color("111827"), EDGE)
+		text_at(Vector2(77, tip_y + 17), hover_tip, 13, INK)
 	for effect in effects:
 		var progress = 1.0 - effect.life / effect.duration
 		var c: Color = Color(effect.color, 1.0 - progress)
-		if effect.kind == "slash":
+		if effect.kind == "trail":
+			draw_line(effect.pos, effect.to, c, 2)
+			pixel_circle(effect.pos.lerp(effect.to, progress), 5, c)
+		elif effect.kind == "slash":
 			var a: Vector2 = effect.pos + Vector2(-27, 24) * (1.0 - progress * 0.3)
 			var b: Vector2 = effect.pos + Vector2(30, -27) * (0.5 + progress)
 			draw_line(a, b, c, 6 * (1.0 - progress) + 1)
 			draw_line(a + Vector2(5, 2), b + Vector2(5, 2), Color(1, 0.9, 0.75, 1.0 - progress), 2)
 		else:
-			draw_rect(Rect2(effect.pos - Vector2.ONE * (12 + progress * 30), Vector2.ONE * (24 + progress * 60)), c, false, 2)
+			draw_arc(effect.pos, 12 + progress * 32, 0, TAU, 24, c, 3)
+			draw_arc(effect.pos, 6 + progress * 24, 0, TAU, 16, Color(c, c.a * 0.4), 2)
 	for p in particles:
 		draw_rect(Rect2(p.pos.snapped(Vector2(2, 2)), Vector2.ONE * p.size), Color(p.color, clampf(p.life * 2, 0, 1)))
 	for f in floats:
@@ -325,38 +323,50 @@ func draw_boss(center: Vector2, scale_px: int = 1) -> void:
 
 func draw_build() -> void:
 	text_at(Vector2(44, 54), "DICEBOUND", 25, GOLD)
-	text_at(Vector2(44, 103), "01 / CARVE YOUR FATE", 29, INK)
-	text_at(Vector2(44, 133), "Equip owned faces. Click a rune, then a die side. Each hero has three mixed d6.", 14, MUTED)
+	text_at(Vector2(44, 103), "CARVE YOUR FATE", 29, INK)
+	text_at(Vector2(44, 133), "1  PICK A DIE SIDE     2  CHOOSE AN ABILITY     3  ENTER THE ARENA", 14, MUTED)
 	for h in range(3):
 		var x = 44 + h * 246
 		box(Rect2(x, 160, 232, 85), COLORS[h].darkened(0.85), COLORS[h] if builder == h else EDGE)
 		draw_hero(Vector2(x + 32, 206), h, 1)
 		text_at(Vector2(x + 62, 191), NAMES[h], 18, COLORS[h])
-		text_at(Vector2(x + 62, 214), "6 HP / BROKEN BODY", 11, MUTED)
-		button(Rect2(x + 63, 221, 150, 19), "EDIT DICE", "hero:%d" % h, true, COLORS[h])
-	text_at(Vector2(48, 280), NAMES[builder] + " / ACTION DICE", 18, COLORS[builder])
+		text_at(Vector2(x + 62, 214), "6 HP / THREE MIXED DICE", 10, MUTED)
+		button(Rect2(x + 63, 221, 150, 19), "EDIT LOADOUT", "hero:%d" % h, true, COLORS[h])
+	for i in range(3):
+		var label: String = ["Balanced", "Assault", "Support"][i]
+		button(Rect2(104 + i * 208, 263, 196, 29), label.to_upper() + " PRESET", "preset:" + label, true, COLORS[builder])
 	for d in range(3):
-		var y = 300 + d * 100
-		text_at(Vector2(47, y + 38), ["I", "II", "III"][d], 20, GOLD)
+		var y = 310 + d * 100
+		var n = 6 - builds[builder].slice(d * 6, d * 6 + 6).count(0)
+		text_at(Vector2(47, y + 28), ["I", "II", "III"][d], 18, GOLD)
+		text_at(Vector2(42, y + 49), "%d%%" % roundi(n / 6.0 * 100), 11, MUTED)
 		for side in range(6):
-			var face: int = builds[builder][d * 6 + side]
-			die(Rect2(105 + side * 104, y, 92, 78), face, "slot:%d" % (d * 6 + side), false, false)
-	box(Rect2(790, 160, 444, 430))
-	text_at(Vector2(810, 191), "YOUR FACE POOL", 18, GOLD)
+			var index = d * 6 + side
+			var face: int = builds[builder][index]
+			die(Rect2(105 + side * 104, y, 92, 78), face, "slot:%d" % index, false, build_slot == index)
+	box(Rect2(790, 160, 444, 487))
+	text_at(Vector2(810, 190), "CHOOSE A FACE FOR DIE %s / SIDE %d" % [["I", "II", "III"][build_slot / 6], build_slot % 6 + 1], 13, GOLD)
 	for f in range(1, 9):
-		var y = 207 + (f - 1) * 42
-		var n = builds[builder].count(f)
-		button(Rect2(810, y, 310, 32), FACES[f], "paint:%d" % f, true, face_color(f))
-		text_at(Vector2(1134, y + 22), "%d/%d" % [n, LIMITS[f]], 15, RED if n > LIMITS[f] else MUTED)
-		if paint_face == f:
-			draw_rect(Rect2(798, y + 8, 5, 16), GOLD)
-	button(Rect2(810, 551, 310, 26), "BLANK / ERASE", "paint:0", true, MUTED)
+		var r = Rect2(808 + ((f - 1) % 2) * 207, 207 + ((f - 1) / 2) * 72, 196, 63)
+		var color = face_color(f)
+		var count = builds[builder].count(f)
+		var enabled = count < LIMITS[f] or LIMITS[f] == 1 or builds[builder][build_slot] == f
+		box(r, color.darkened(0.86), GOLD if paint_face == f else color.darkened(0.4))
+		text_at(r.position + Vector2(10, 19), SHORT_NAMES[f], 13, INK if enabled else MUTED)
+		text_at(r.position + Vector2(10, 43), POWER[f], 13, color)
+		text_at(r.position + Vector2(144, 56), "%d/%d" % [count, LIMITS[f]], 10, MUTED)
+		if enabled: hits.append({"r": r, "id": "paint:%d" % f})
+		if r.has_point(get_local_mouse_position()): hover_tip = FACES[f] + ": " + DESCS[f]
+	button(Rect2(809, 502, 402, 30), "CLEAR SIDE / INSTALL BLANK", "paint:0", true, MUTED)
+	text_at(Vector2(809, 557), FACES[paint_face].to_upper(), 16, face_color(paint_face))
+	wrapped(Vector2(809, 580), DESCS[paint_face], 43, INK, 12)
+	text_at(Vector2(809, 633), "Combat cost: 1 rolled die. No HP or gold cost.", 11, MUTED)
+	text_at(Vector2(47, 635), "SOUL: %d BLANKS PER DIE / BODY: MOVE 3, DEFENSE 3, SKILL 3" % blank_min, 12, GOLD)
+	text_at(Vector2(47, 660), "Percentages show each die's chance to roll an ability.", 12, MUTED)
 	var error = build_error(builder)
-	text_at(Vector2(47, 638), "SOUL: " + ("ORIGINAL / 3 BLANKS" if blank_min == 3 else "ALTERNATIVE / 2 BLANKS"), 15, GOLD)
-	text_at(Vector2(47, 665), "Body caps: Move 3 / Defense 3 / Skill 3. Memory: empty.", 13, MUTED)
-	text_at(Vector2(47, 691), "BUILD LEGAL" if error.is_empty() else error, 14, TEAL if error.is_empty() else RED)
-	button(Rect2(792, 610, 210, 38), "SOUL: %d BLANKS" % blank_min, "soul", true, MUTED)
-	button(Rect2(1017, 610, 215, 38), "RESET BUILD", "reset_build", true, MUTED)
+	text_at(Vector2(47, 689), "LEGAL LOADOUT / READY TO FIGHT" if error.is_empty() else error, 13, TEAL if error.is_empty() else RED)
+	button(Rect2(104, 708, 302, 27), "SOUL / %d BLANK MINIMUM" % blank_min, "soul", true, MUTED)
+	button(Rect2(420, 708, 302, 27), "RESET THIS HERO", "reset_build", true, MUTED)
 	var legal = true
 	for h in range(3):
 		if not build_error(h).is_empty(): legal = false
@@ -475,6 +485,8 @@ func new_round() -> void:
 	next_turn()
 
 func next_turn() -> void:
+	armed_die = -1
+	end_confirm = false
 	if check_end(): return
 	selected = -1
 	mode = ""
@@ -584,6 +596,7 @@ func move_unit(h: int, dest: Vector2i) -> void:
 	var old = unit_center(h)
 	if h == 3: boss.pos = dest
 	else: heroes[h].pos = dest
+	effects.append({"pos": old, "to": unit_center(h), "kind": "trail", "color": TEAL, "life": 0.5, "duration": 0.5})
 	emit(old, TEAL, 8)
 	emit(unit_center(h), TEAL, 8)
 	sfx("step")
@@ -631,6 +644,7 @@ func select_die(d: int) -> void:
 		4:
 			u.block += 1
 			float_text(active, "+1 BLOCK", COLORS[0])
+			emit(unit_center(active), COLORS[0], 22)
 			sfx("block")
 			consume()
 		6:
@@ -643,6 +657,7 @@ func select_die(d: int) -> void:
 		8: mode = "shove"
 
 func consume() -> void:
+	armed_die = -1
 	if active < 3 and selected >= 0: heroes[active].spent[selected] = true
 	selected = -1
 	mode = ""
@@ -719,6 +734,8 @@ func damage(target: int, amount: int, unavoidable: bool = false) -> void:
 	sfx("hit" if lost > 0 else "block")
 	shake = 4 if lost > 0 else 1
 	if lost > 0:
+		flash = 0.55
+		hurt_timers[target] = 0.30
 		effects.append({"pos": unit_center(target), "kind": "slash", "color": GOLD, "life": 0.3, "duration": 0.3})
 	if target == 3:
 		u.hp = maxi(0, u.hp - lost)
@@ -954,8 +971,17 @@ func apply_push(target: int, dir: Vector2i, collision: bool) -> void:
 	else: say("Shove stops at the obstruction; no collision penalty.")
 
 func draw_battle() -> void:
+	var visual_mode = mode
+	var display_reachable = reachable
+	var hover_die = hovered_die()
+	if selected < 0 and hover_die >= 0 and active < 3 and not heroes[active].spent[hover_die] and mode.is_empty():
+		var f: int = heroes[active].dice[hover_die * 6 + heroes[active].roll[hover_die]]
+		if f in [2, 3]: display_reachable = movement_options(active, 3 if f == 3 else 1, f == 3)
+		elif f == 1: visual_mode = "attack"
+		elif f == 7: visual_mode = "heal"
+		elif f == 8: visual_mode = "shove"
 	text_at(Vector2(44, 52), "DICEBOUND", 24, GOLD)
-	text_at(Vector2(267, 49), "THE HOLLOW TRIBUNAL", 15, MUTED)
+	text_at(Vector2(267, 49), "THE HOLLOW TRIBUNAL / v0.2", 14, MUTED)
 	text_at(Vector2(44, 92), "ROUND %02d" % round_no, 20, INK)
 	text_at(Vector2(230, 91), "FIXED INITIATIVE", 12, MUTED)
 	for i in range(4):
@@ -971,6 +997,12 @@ func draw_battle() -> void:
 		draw_rect(Rect2(66 + n * 27, 156, 24, 9), RED if n < boss.hp else Color("332636"))
 	if boss.block > 0: text_at(Vector2(66, 183), "BLOCK %d" % boss.block, 12, COLORS[0])
 	var offset = Vector2(sin(time * 110), cos(time * 90)) * shake
+	box(Rect2(BOARD - Vector2(5, 5), Vector2.ONE * (CELL * 9) + Vector2(8, 8)), Color("141925"), Color("514151"))
+	for torch_pos in [Vector2(39, 173), Vector2(574, 173), Vector2(39, 702), Vector2(574, 702)]:
+		for ring in range(4, 0, -1): pixel_circle(torch_pos, ring * 7, Color(1.0, 0.5, 0.15, 0.018))
+		draw_rect(Rect2(torch_pos + Vector2(-2, 1), Vector2(5, 13)), Color("79665b"))
+		draw_rect(Rect2(torch_pos + Vector2(-3, -8 - int(sin(time * 12 + torch_pos.x) * 2)), Vector2(7, 10)), GOLD)
+		draw_rect(Rect2(torch_pos + Vector2(-1, -5), Vector2(3, 5)), Color("fff0b4"))
 	for y in range(9):
 		for x in range(9):
 			var p = Vector2i(x, y)
@@ -980,18 +1012,19 @@ func draw_battle() -> void:
 			draw_rect(Rect2(r.position + Vector2(3, 3), Vector2(CELL - 8, 1)), col.lightened(0.08))
 			if (x * 13 + y * 7) % 11 == 0:
 				draw_line(r.position + Vector2(12, 6), r.position + Vector2(18, 19), col.darkened(0.3), 2)
-			if reachable.has(p):
+			if display_reachable.has(p):
 				draw_rect(r, Color(0.35, 0.8, 0.68, 0.2))
 				draw_rect(r.grow(-3), TEAL, false, 2)
+				if display_reachable[p] > 0: text_at(r.position + Vector2(22, 32), str(display_reachable[p]), 14, TEAL)
 			if active == 3 and mode in ["reaction", "reaction_move", "attack_ready"]:
 				var occupant = unit_at(p)
 				if occupant >= 0 and occupant in pending.get("targets", []): draw_rect(r.grow(-3), RED, false, 3)
-			if mode in ["attack", "heal", "shove"] and active < 3:
+			if visual_mode in ["attack", "heal", "shove"] and active < 3:
 				var target = unit_at(p)
 				if target >= 0:
 					var dist = distance(heroes[active].pos, unit_pos(target), 2 if target == 3 else 1)
-					if (dist == 1 and mode != "heal") or (mode == "heal" and target < 3 and dist <= 1):
-						draw_rect(r.grow(-3), RED if mode == "attack" else TEAL, false, 3)
+					if (dist == 1 and visual_mode != "heal") or (visual_mode == "heal" and target < 3 and dist <= 1):
+						draw_rect(r.grow(-3), RED if visual_mode == "attack" else TEAL, false, 3)
 			if mode == "push_direction":
 				for choice in pending.choices:
 					if p in footprint(choice.dest, 2 if pending.target == 3 else 1): draw_rect(r.grow(-5), GOLD, false, 2)
@@ -999,17 +1032,20 @@ func draw_battle() -> void:
 	for y in range(9): text_at(BOARD + Vector2(-22, y * CELL + 32), char(65 + y), 12, MUTED)
 	# The boss sprite occupies four complete squares.
 	var bc = unit_center(3) + offset
+	pixel_circle(bc, 45 + int(sin(time * 2) * 3), Color(0.9, 0.23, 0.36, 0.09))
 	var br = Rect2(BOARD + Vector2(boss.pos) * CELL + offset + Vector2(2, 2), Vector2.ONE * (CELL * 2 - 6))
 	draw_rect(br, Color(0.60, 0.23, 0.32, 0.18))
 	draw_rect(br, RED.darkened(0.4), false, 2)
 	draw_boss(bc + Vector2(0, sin(time * 2) * 2), 2)
+	if hurt_timers.get(3, 0.0) > 0: draw_rect(br, Color(1, 0.4, 0.4, hurt_timers[3] * 0.7))
 	for h in range(3):
 		var u: Dictionary = heroes[h]
 		if u.dead: continue
 		var center = unit_center(h) + offset
 		if active == h:
 			draw_rect(Rect2(center - Vector2(24, 24), Vector2(48, 48)), COLORS[h], false, 2)
-		draw_hero(center, h, 1, u.down)
+		draw_hero(center + Vector2(0, sin(time * 2.5 + h) * 1.5), h, 1, u.down)
+		if hurt_timers.get(h, 0.0) > 0: draw_rect(Rect2(center - Vector2(17, 22), Vector2(34, 44)), Color(1, 0.7, 0.6, hurt_timers[h]))
 		for n in range(6): draw_rect(Rect2(center + Vector2(-23 + n * 8, 22), Vector2(6, 3)), COLORS[h] if n < u.hp else Color("191b28"))
 		if u.block > 0: text_at(center + Vector2(16, -17), str(u.block), 12, COLORS[0])
 		if not u.react.is_empty(): text_at(center + Vector2(-25, -20), "!", 16, GOLD)
@@ -1021,28 +1057,9 @@ func draw_battle() -> void:
 		box(Rect2(x, 166, 188, 48), Color("242234"), GOLD if active == 3 and boss_step == d else EDGE)
 		text_at(Vector2(x + 10, 185), ["I", "II", "III"][d], 11, MUTED)
 		text_at(Vector2(x + 10, 205), boss_roll[d], 14, RED)
+		if Rect2(x, 166, 188, 48).has_point(get_local_mouse_position()): hover_tip = BOSS_TIPS.get(boss_roll[d], "")
 	if active < 3:
-		text_at(Vector2(610, 250), NAMES[active] + " / " + ("RECOVERY TURN" if recovery_active else "YOUR TURN"), 21, COLORS[active])
-		for d in range(3):
-			var f: int = heroes[active].dice[d * 6 + heroes[active].roll[d]]
-			die(Rect2(610 + d * 137, 268, 122, 94), int(time * 30 + d * 3) % 9 if roll_anim > 0 else f, "die:%d" % d, heroes[active].spent[d] and not d in heroes[active].react, selected == d)
-			if d in heroes[active].react: text_at(Vector2(619 + d * 137, 383), "STORED", 12, GOLD)
-		button(Rect2(1030, 268, 180, 41), "END TURN [E]", "end", mode != "stun", GOLD)
-		button(Rect2(1030, 320, 180, 41), "SPEND / SKIP", "spend", selected >= 0 and mode != "stun", MUTED)
-		var instruction = "Choose a die. Resolve your results in any order."
-		match mode:
-			"attack": instruction = "BASIC STRIKE / click an adjacent unit to deal 1."
-			"move": instruction = "MOVE / click a highlighted destination."
-			"move_soul": instruction = "BOUND SOUL / spend Blank to Move 1, once per turn."
-			"heal": instruction = "FIRST AID / click yourself or an adjacent hero."
-			"focus": instruction = "FOCUS / click another unresolved die to reroll."
-			"shove": instruction = "SHOVE / click an adjacent unit, then a direction."
-			"stun": instruction = "STUNNED / choose one unresolved die to set aside."
-			"push_direction": instruction = "PUSH / choose a highlighted direction on the grid."
-		wrapped(Vector2(610, 418), instruction, 65, GOLD, 14)
-		if selected >= 0 and mode != "push_direction":
-			var f: int = heroes[active].dice[selected * 6 + heroes[active].roll[selected]]
-			wrapped(Vector2(610, 467), DESCS[f], 65, MUTED, 13)
+		draw_hero_console()
 	else:
 		draw_boss_console()
 	if mode == "push_direction":
@@ -1060,6 +1077,10 @@ func draw_battle() -> void:
 		var status = "DEAD" if u.dead else ("DOWNED" if u.down else ("BROKEN" if u.broken else ("WEAK" if u.weak else "")))
 		if u.stun: status += " STUN"
 		text_at(Vector2(x + 100, 574), status, 10, RED)
+		for d in range(3):
+			var face: int = u.dice[d * 6 + u.roll[d]]
+			var result_color = GOLD if d in u.react else (MUTED.darkened(0.35) if u.spent[d] else face_color(face))
+			text_at(Vector2(x + 12 + d * 65, 616), SIGNS[face], 9, result_color)
 	text_at(Vector2(592, 649), "ENCOUNTER CHRONICLE", 11, GOLD)
 	for i in range(mini(3, log_lines.size())):
 		text_at(Vector2(592, 670 + i * 18), str(log_lines[i]).left(76), 12, MUTED)
@@ -1123,11 +1144,16 @@ func draw_help() -> void:
 	draw_rect(Rect2(0, 0, 1280, 800), Color(0.02, 0.03, 0.06, 0.92))
 	box(Rect2(145, 65, 990, 670), PANEL, GOLD)
 	text_at(Vector2(176, 111), "THE FIELD GUIDE", 28, GOLD)
-	var lines = ["01  BUILD: three mixed six-sided dice per hero. Own copies matter.", "    Original Soul: at least 3 Blanks per die. Body caps: M3 / D3 / S3.", "02  ROLL: everyone rolls together each round. Initiative stays fixed.", "03  ACT: click a die, then a highlighted square or legal target.", "    Basic Strike = 1 damage. First Aid = 1 heal. No Numeric rolls.", "04  POSITION: orthogonal movement only. Boss occupies 2 x 2 squares.", "    Tactical Movement travels up to 3 in one straight direction.", "05  REACT: Tactical Defense stores automatically. Gain 1 Block and", "    optionally step when attacked. Unused Reactions expire next roll.", "06  SURVIVE: Block absorbs damage, expires at your own turn start.", "    At 0 HP: Downed. First Aid revives with Broken + a recovery turn.", "    A Broken hero reaching 0 dies. All Downed/dead = immediate loss.", "07  BOSS: resolve I, II, III. You choose legal routes, push directions", "    and the face lost to Fracture. Enemy intentions are public.", "08  WIN: reduce the boss's 18 HP to zero. Earn a Bound Move-1 Soul.", "", "CONTROLS  Mouse: select/use   1/2/3: dice   E: end turn   Esc: help", "", "Digital adaptation: one person controls all three heroes; hero ties", "use roster order. Deployment is a prototype choice. Full campaign", "events and extended catalogue faces are outside this first encounter."]
+	var lines = ["01  BUILD: three mixed six-sided dice per hero. Own copies matter.", "    Original Soul: at least 3 Blanks per die. Body caps: M3 / D3 / S3.", "02  ROLL: everyone rolls together each round. Initiative stays fixed.", "03  ACT: click a die, then a highlighted square or legal target.", "    Basic Strike = 1 damage. First Aid = 1 heal. No Numeric rolls.", "04  POSITION: orthogonal movement only. Boss occupies 2 x 2 squares.", "    Tactical Movement travels up to 3 in one straight direction.", "05  REACT: Tactical Defense stores automatically. Gain 1 Block and", "    optionally step when attacked. Unused Reactions expire next roll.", "06  SURVIVE: Block absorbs damage, expires at your own turn start.", "    At 0 HP: Downed. First Aid revives with Broken + a recovery turn.", "    A Broken hero reaching 0 dies. All Downed/dead = immediate loss.", "07  BOSS: resolve I, II, III. You choose legal routes, push directions", "    and the face lost to Fracture. Enemy intentions are public.", "08  WIN: reduce the boss's 18 HP to zero. Earn a Bound Move-1 Soul.", "", "CONTROLS  Mouse: select/use   1/2/3: dice   E: end turn   Esc: cancel/help", "", "Digital adaptation: one person controls all three heroes; hero ties", "use roster order. Deployment is a prototype choice. Full campaign", "events and extended catalogue faces are outside this first encounter."]
 	for i in range(lines.size()): text_at(Vector2(177, 152 + i * 24), lines[i], 14, MUTED if i > 16 else INK)
 	button(Rect2(853, 677, 245, 39), "BACK TO THE FIRE", "help", true, GOLD)
 
 func _gui_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+		if screen == "battle" and phase == "hero" and not help_open and mode not in ["focus", "stun", "push_direction"]:
+			handle("cancel_ability")
+			accept_event()
+			return
 	if event is InputEventMouseMotion:
 		var clickable = false
 		for hit in hits:
@@ -1148,10 +1174,12 @@ func _gui_input(event: InputEvent) -> void:
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_ESCAPE:
-			help_open = not help_open
+			if screen == "battle" and phase == "hero" and not help_open and (end_confirm or selected >= 0) and mode not in ["focus", "stun", "push_direction"]:
+				handle("cancel_ability")
+			else: help_open = not help_open
 		elif not help_open and screen == "battle":
-			if event.keycode in [KEY_1, KEY_2, KEY_3]: select_die(event.keycode - KEY_1)
-			if event.keycode == KEY_E and phase == "hero" and mode != "stun": finish_turn()
+			if event.keycode in [KEY_1, KEY_2, KEY_3]: choose_ability(event.keycode - KEY_1)
+			if event.keycode == KEY_E and phase == "hero" and mode != "stun": request_end_turn()
 
 func _exit_tree() -> void:
 	if is_instance_valid(audio):
@@ -1186,12 +1214,28 @@ func handle(id: String) -> void:
 		else: blank_min = 2 if blank_min == 3 else 3
 	elif id == "reset_build": builds[builder] = [1, 2, 4, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 6, 0, 0, 0]
 	elif id.begins_with("hero:"): builder = int(id.get_slice(":", 1))
-	elif id.begins_with("paint:"): paint_face = int(id.get_slice(":", 1))
+	elif id.begins_with("paint:"):
+		paint_face = int(id.get_slice(":", 1))
+		equip_face(build_slot, paint_face)
 	elif id.begins_with("slot:"):
-		builds[builder][int(id.get_slice(":", 1))] = paint_face
-		sfx("carve")
-	elif id.begins_with("die:"): select_die(int(id.get_slice(":", 1)))
-	elif id == "end": finish_turn()
+		build_slot = int(id.get_slice(":", 1))
+		paint_face = builds[builder][build_slot]
+		sfx("step")
+	elif id.begins_with("die:"): choose_ability(int(id.get_slice(":", 1)))
+	elif id == "end": request_end_turn()
+	elif id == "confirm_end": finish_turn()
+	elif id == "activate":
+		var d = armed_die
+		armed_die = -1
+		if d >= 0: select_die(d)
+	elif id == "cancel_ability":
+		armed_die = -1
+		selected = -1
+		end_confirm = false
+		if mode != "stun": mode = ""
+		reachable.clear()
+	elif id.begins_with("target:"): board_click(unit_pos(int(id.get_slice(":", 1))))
+	elif id.begins_with("preset:"): apply_preset(id.get_slice(":", 1))
 	elif id == "spend": consume()
 	elif id == "boss_next": resolve_boss()
 	elif id == "auto_move":
@@ -1220,3 +1264,167 @@ func handle(id: String) -> void:
 				heroes[h].react.erase(d)
 		say(NAMES[h] + " loses one face to Fracture (encounter only).")
 		boss_complete()
+
+func choose_ability(d: int) -> void:
+	if active >= 3 or phase != "hero" or roll_anim > 0: return
+	if mode in ["focus", "stun"]:
+		select_die(d)
+		return
+	var u: Dictionary = heroes[active]
+	if u.spent[d]:
+		notify("Reaction stored automatically." if d in u.react else "This die has already been spent.")
+		return
+	end_confirm = false
+	armed_die = -1
+	var f: int = u.dice[d * 6 + u.roll[d]]
+	if f in [4, 6] or (f == 0 and (not reward or u.soul_used)):
+		selected = d
+		armed_die = d
+		mode = "confirm"
+		reachable.clear()
+		sfx("step")
+	else:
+		select_die(d)
+		sfx("step")
+
+func ready_action_count() -> int:
+	if active >= 3: return 0
+	var count = 0
+	for d in unresolved(active):
+		var f: int = heroes[active].dice[d * 6 + heroes[active].roll[d]]
+		if f != 0 or (reward and not heroes[active].soul_used): count += 1
+	return count
+
+func request_end_turn() -> void:
+	if mode == "stun": return
+	if end_confirm or ready_action_count() == 0: finish_turn()
+	else: end_confirm = true
+
+func hovered_die() -> int:
+	if active >= 3 or phase != "hero": return -1
+	for d in range(3):
+		if Rect2(610 + d * 202, 268, 188, 145).has_point(get_local_mouse_position()): return d
+	return -1
+
+func legal_ability_targets(f: int) -> Array:
+	var targets = []
+	if active >= 3: return targets
+	for h in range(4):
+		if h < 3 and heroes[h].dead: continue
+		var dist = distance(heroes[active].pos, unit_pos(h), 2 if h == 3 else 1)
+		if f == 7 and h < 3 and dist <= 1: targets.append(h)
+		if f in [1, 8] and h != active and dist == 1: targets.append(h)
+	return targets
+
+func draw_ability_card(d: int) -> void:
+	var u: Dictionary = heroes[active]
+	var f: int = u.dice[d * 6 + u.roll[d]]
+	var r = Rect2(610 + d * 202, 268, 188, 145)
+	var stored = d in u.react
+	var spent: bool = u.spent[d] and not stored
+	var hover = r.has_point(get_local_mouse_position())
+	var color = face_color(f) if not spent else MUTED.darkened(0.4)
+	box(r, color.darkened(0.86) if hover or selected == d else Color("202639"), GOLD if selected == d else color.darkened(0.28))
+	draw_rect(Rect2(r.position, Vector2(4, r.size.y)), color)
+	text_at(r.position + Vector2(12, 19), "[%d] %s / DIE %s" % [d + 1, CATS[f].to_upper(), ["I", "II", "III"][d]], 10, color)
+	text_at(r.position + Vector2(12, 43), SHORT_NAMES[f], 15, INK if not spent else MUTED)
+	var value: String = POWER[f]
+	if f == 1 and u.weak: value = "0 DMG / WEAK"
+	if f == 0 and reward and not u.soul_used: value = "SOUL: MOVE 1"
+	if roll_anim > 0: value = ". . ."
+	text_at(r.position + Vector2(12, 77), value, 19, color)
+	var state = "READY / CLICK TO SELECT"
+	if spent: state = "SPENT THIS ROUND"
+	elif stored: state = "STORED / AUTO REACTION"
+	elif f in [1, 8] and legal_ability_targets(f).is_empty(): state = "NO ADJACENT TARGET"
+	elif f == 0 and (not reward or u.soul_used): state = "BLANK / NO EFFECT"
+	text_at(r.position + Vector2(12, 103), state, 10, GOLD if stored else MUTED)
+	draw_line(r.position + Vector2(12, 115), r.position + Vector2(176, 115), EDGE, 1)
+	text_at(r.position + Vector2(12, 133), "COST: 1 ROLLED DIE" if not stored else "SPENDS WHEN TRIGGERED", 10, color)
+	if not spent:
+		hits.append({"r": r, "id": "die:%d" % d})
+	if hover: hover_tip = FACES[f] + " / " + DESCS[f] + " Cost: this rolled die; no HP cost."
+
+func draw_hero_console() -> void:
+	var u: Dictionary = heroes[active]
+	text_at(Vector2(610, 247), NAMES[active] + (" / RECOVERY TURN" if recovery_active else " / YOUR TURN"), 18, COLORS[active])
+	button(Rect2(1055, 225, 155, 32), "END TURN [E]", "end", mode != "stun", GOLD)
+	for d in range(3): draw_ability_card(d)
+	if end_confirm:
+		box(Rect2(605, 423, 613, 103), Color("302534"), GOLD)
+		text_at(Vector2(619, 447), "%d unused ability result(s) will be discarded. End turn?" % ready_action_count(), 13, GOLD)
+		button(Rect2(619, 465, 280, 40), "YES / END TURN", "confirm_end", true, RED)
+		button(Rect2(913, 465, 290, 40), "KEEP PLAYING", "cancel_ability", true, TEAL)
+		return
+	if selected < 0:
+		text_at(Vector2(610, 443), "1  CHOOSE AN ABILITY     2  CHOOSE A TARGET", 14, GOLD)
+		text_at(Vector2(610, 469), "Hover a card to preview its reach. Click to select.", 12, MUTED)
+		if mode == "stun": text_at(Vector2(610, 498), "STUNNED: click one ready card to set its die aside.", 13, RED)
+		else: text_at(Vector2(610, 498), "No mana or gold cost. Each result can be used once.", 12, MUTED)
+		return
+	var f: int = u.dice[selected * 6 + u.roll[selected]]
+	var instruction = "Select a highlighted target on the board."
+	match mode:
+		"move", "move_soul": instruction = "Choose a GREEN square. Cost: this die."
+		"attack": instruction = "Choose a RED target. Cost: this die."
+		"heal": instruction = "Choose an ally or yourself. Cost: this die."
+		"shove": instruction = "Choose an adjacent unit, then a push direction."
+		"focus": instruction = "Click ANOTHER ready card to reroll that die."
+		"confirm": instruction = "Preview only / nothing has been spent yet."
+		"push_direction": instruction = "Choose a gold push direction below."
+	text_at(Vector2(610, 439), instruction, 13, GOLD)
+	if mode == "push_direction": return
+	if mode == "confirm":
+		text_at(Vector2(610, 462), "Gain 1 Block until your next turn. Spend this die." if f == 4 else ("Spend Focus, then replace another ready die with a new roll." if f == 6 else "Discard this Blank without an effect. No HP cost."), 12, MUTED)
+		var label = "GAIN 1 BLOCK" if f == 4 else ("SPEND FOCUS / CHOOSE REROLL" if f == 6 else "DISCARD BLANK")
+		button(Rect2(610, 478, 397, 37), label, "activate", true, face_color(f))
+		button(Rect2(1020, 478, 190, 37), "CANCEL / FREE", "cancel_ability", true, MUTED)
+	elif mode in ["attack", "heal", "shove"]:
+		var targets = legal_ability_targets(f)
+		if targets.is_empty():
+			text_at(Vector2(610, 465), "No legal target. Move closer using another ability.", 12, MUTED)
+		else:
+			for i in range(mini(targets.size(), 3)):
+				var h: int = targets[i]
+				var name_text = "HOLLOW ONE" if h == 3 else NAMES[h]
+				var label = name_text
+				if f == 1:
+					var unit: Dictionary = boss if h == 3 else heroes[h]
+					var amount = 0 if u.weak else 1
+					label += " -%d HP" % maxi(0, amount - unit.block)
+				elif f == 7: label += " +%d HP" % mini(1, 6 - heroes[h].hp)
+				button(Rect2(610 + i * 202, 456, 188, 32), label, "target:%d" % h, true, face_color(f))
+		button(Rect2(610, 495, 285, 27), "CANCEL SELECTION / FREE", "cancel_ability", true, MUTED)
+		button(Rect2(909, 495, 300, 27), "DISCARD RESULT / NO EFFECT", "spend", true, MUTED)
+	else:
+		text_at(Vector2(610, 465), DESCS[f].left(76), 12, MUTED)
+		if mode != "focus": button(Rect2(610, 482, 285, 35), "CANCEL SELECTION / FREE", "cancel_ability", true, MUTED)
+		button(Rect2(909, 482, 300, 35), "DISCARD RESULT", "spend", true, MUTED)
+
+func equip_face(slot: int, face: int) -> void:
+	var previous: Array = builds[builder].duplicate()
+	var old: int = builds[builder][slot]
+	var swapped = false
+	if face != old and face != 0 and builds[builder].count(face) >= LIMITS[face]:
+		if LIMITS[face] == 1:
+			var source: int = builds[builder].find(face)
+			builds[builder][source] = old
+			swapped = true
+	builds[builder][slot] = face
+	var error = build_error(builder)
+	if not error.is_empty() and face != 0:
+		builds[builder] = previous
+		notify(error + " Clear a side or swap two equipped abilities.")
+		return
+	sfx("carve")
+	notify(("Moved your owned " if swapped else "Equipped ") + FACES[face] + (" / previous sides swapped." if swapped else ". No HP or gold cost."))
+
+func apply_preset(which: String) -> void:
+	match which:
+		"Assault": builds[builder] = [1, 1, 2, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 2, 0, 0, 0]
+		"Support": builds[builder] = [1, 2, 4, 0, 0, 0, 7, 3, 5, 0, 0, 0, 6, 8, 2, 0, 0, 0]
+		_: builds[builder] = [1, 2, 4, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 6, 0, 0, 0]
+	build_slot = 0
+	paint_face = builds[builder][0]
+	sfx("carve")
+	notify(which + " preset equipped. All ownership and Soul limits checked.")

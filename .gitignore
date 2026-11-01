@@ -1,3 +1,7 @@
 .godot/
 *.tmp
 .DS_Store
+
+# Intermediate PCM used only when regenerating the original score.
+assets/tribunal.wav
+assets/tribunal.wav.import

@@ -18,7 +18,7 @@ Click **Carve Your Dice** to build, or **Quick Battle** to use the legal starter
 - Mouse: choose dice, targets, movement destinations, boss routes, Fracture losses, and push directions.
 - `1`, `2`, `3`: select a hero's rolled die.
 - `E`: finish the active hero's turn, declining remaining beneficial results.
-- `Esc`: open/close the field guide.
+- `Esc` or right-click: cancel an uncommitted selection for free. With no selection, `Esc` opens/closes the field guide.
 - SFX button: mute/unmute both music and effects.
 
 Ordinary actions wait for their owner's initiative activation. Roll results, boss intentions, and stored Reactions are public. The boss does **not** act after each hero. Click **Resolve Die** during its activation and follow the prompts. Tactical Defense is offered at attack declaration, before damage. Gold push-direction buttons also allow selecting off-board collision directions.
@@ -27,7 +27,7 @@ Builds and the unlocked Bound Soul are saved locally; an encounter itself is not
 
 ### Presentation
 
-Original procedurally drawn pixel heroes, a twisted humanoid boss, a ruined cathedral title scene, eclipse, limited dark-fantasy palette, crisp rune UI, animated rolling, embers, slash streaks, block/healing bursts, floating combat text, screen shake, procedural chip effects and an eight-second looping ambient score. Art and audio are self-contained.
+Original procedurally drawn pixel heroes, a twisted humanoid boss, a ruined cathedral title scene, eclipse, limited dark-fantasy palette, crisp rune UI, animated rolling, embers, slash streaks, block/healing bursts, floating combat text, screen shake, procedural chip effects and an original 35.6-second looping stereo score with melody, chord pads, arpeggios, bass, and percussion. Art and audio are self-contained.
 
 ## Development and tests
 
@@ -58,3 +58,11 @@ The prebuilt browser game is in `docs/index.html`. It embeds every runtime asset
 Publish this repository as `dicebound`. In GitHub **Settings → Pages**, choose **Deploy from a branch**, branch **main**, folder **/docs**. The deployment does not require an Actions build, Godot installation, or external asset hosting. After GitHub reports a successful deployment, use the HTTPS URL shown by Pages.
 
 To update the site, re-export the Web build and run `tools/build_standalone.py`, with `docs/index.html` as the output. Commit that file and push the main branch.
+
+## v0.2 — clarity and presentation
+
+Combat uses large ability cards with full names, exact effects, ready/spent/Reaction states and explicit rolled-die costs. Hovering previews legal reach. Selecting Block or Focus does not spend it until confirmation; cancelling selection is free. Direct target buttons show the actual HP change after Block or the healing cap. Ending a turn with unused results requires confirmation.
+
+The builder is now side-first: choose a die side, then an ability. Balanced, Assault and Support presets are legal under either starting Soul. Invalid placements are refused; unique owned faces can swap between sides without duplication. Probabilities show each die's non-Blank roll chance.
+
+The presentation adds a newly composed stereo chip score, distinct hit/heal/Block/step/carve sounds, attack streaks, layered impact rings, movement trails, hit flashes, breathing sprites, and torchlight. The music source generator is `tools/compose_score.py` (NumPy and FFmpeg are needed only to regenerate audio, not to play or edit the game).

@@ -154,6 +154,7 @@ func run() -> void:
 		auto_step()
 	check(game.victory and game.boss.hp == 0, "full legal-roll winning encounter reaches victory")
 	check(game.reward and game.battles_won >= 1, "winning encounter unlocks Bound Soul reward")
+	check_polish_ui()
 	var wins = 0
 	for scenario in range(20):
 		game.reward = false
@@ -227,3 +228,48 @@ func auto_step() -> void:
 				if not game.heroes[other].dead and game.distance(u.pos, game.heroes[other].pos) <= 1 and game.heroes[other].hp < game.heroes[target].hp: target = other
 			game.board_click(game.heroes[target].pos)
 		_: game.consume()
+
+func check_polish_ui() -> void:
+	game.reward = false
+	game.start_battle(); game.roll_anim = 0
+	game.active = 0
+	game.phase = "hero"
+	game.heroes[0].roll = [2, 0, 1]
+	game.heroes[0].spent = [false, false, false]
+	game.heroes[0].react = []
+	game.choose_ability(0)
+	check(game.mode == "confirm" and not game.heroes[0].spent[0] and game.heroes[0].block == 0, "Guard preview does not spend die")
+	game.handle("cancel_ability")
+	check(not game.heroes[0].spent[0] and game.heroes[0].block == 0, "cancelling an ability is free")
+	game.choose_ability(0)
+	game.handle("activate")
+	check(game.heroes[0].spent[0] and game.heroes[0].block == 1, "Guard confirm grants exact Block and spends once")
+	game.request_end_turn()
+	check(game.end_confirm and game.active == 0, "end turn warns before discarding unused dice")
+	game.handle("cancel_ability")
+	check(not game.end_confirm and game.active == 0, "end-turn warning can be cancelled")
+	game.builder = 0
+	for preset in ["Balanced", "Assault", "Support"]:
+		game.apply_preset(preset)
+		check(game.build_error(0).is_empty(), "preset respects ownership and construction: " + preset)
+	game.apply_preset("Balanced")
+	var before: Array = game.builds[0].duplicate()
+	game.equip_face(3, 1)
+	check(game.builds[0] == before, "builder refuses illegal non-Blank gain")
+	game.equip_face(0, 7)
+	check(game.builds[0][0] == 7 and game.builds[0].count(7) == 1 and game.build_error(0).is_empty(), "unique owned ability swaps without duplication")
+	game.apply_preset("Balanced")
+	game.builds[0][3] = 1
+	game.equip_face(3, 0)
+	check(game.build_error(0).is_empty(), "builder allows clearing an illegal build")
+	game.start_battle(); game.roll_anim = 0
+	game.active = 0
+	game.phase = "hero"
+	game.heroes[0].pos = Vector2i(2, 2)
+	game.heroes[0].roll = [0, 0, 0]
+	game.heroes[0].spent = [false, false, false]
+	game.boss.block = 1
+	game.choose_ability(0)
+	check(game.legal_ability_targets(1).has(3), "target-button list includes adjacent boss footprint")
+	game.handle("target:3")
+	check(game.boss.hp == 18 and game.boss.block == 0 and game.heroes[0].spent[0], "target button resolves actual Block and spends exact die")

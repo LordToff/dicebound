@@ -1,0 +1,60 @@
+# DICEBOUND — The Hollow Tribunal
+
+A playable, 16-bit-style tactical dice-building boss battler made in Godot 4.7, based on the supplied **Master Rules v14 (31 October 2026)** and **Face Catalogue v2 (31 October 2026)**. This is a complete first-encounter prototype, not an implementation of the entire extended catalogue or campaign.
+
+## Play
+
+**Simplest browser version:** open `Play-Dicebound.html` in a current Chrome or Edge browser. The single HTML file embeds the engine, game, artwork and audio. No installation, extraction, network access or local server is needed. Godot requires a secure browser context; ordinary local HTML files are treated as trustworthy by these browsers.
+
+- **Windows:** extract the Windows download and run `Dicebound.exe`. No Godot installation required.
+- **Linux x86-64:** extract the Linux download, make `Dicebound.x86_64` executable if necessary, and run it. No Godot installation required.
+- **Browser:** extract the Web download and serve the entire folder using any static HTTP server, for example `python3 -m http.server 8000` from that folder. Open the server in a current browser. Opening the HTML directly as a local file does not work. WebGL 2 is required; no cross-origin isolation headers are needed for this single-threaded export. The same folder can be uploaded as an HTML game to itch.io, with `index.html` as its entry point.
+- **Edit:** import `project.godot` into Godot **4.7 stable**. The project has no external addons, package manager dependencies, or required credentials.
+
+Click **Carve Your Dice** to build, or **Quick Battle** to use the legal starter loadouts. Select a face from the pool and paint a die side. Every die needs at least three Blanks with the Original starting Soul, or two with the selectable Alternative. Every owned copy and the separate Broken Body category caps are checked.
+
+### Controls
+
+- Mouse: choose dice, targets, movement destinations, boss routes, Fracture losses, and push directions.
+- `1`, `2`, `3`: select a hero's rolled die.
+- `E`: finish the active hero's turn, declining remaining beneficial results.
+- `Esc`: open/close the field guide.
+- SFX button: mute/unmute both music and effects.
+
+Ordinary actions wait for their owner's initiative activation. Roll results, boss intentions, and stored Reactions are public. The boss does **not** act after each hero. Click **Resolve Die** during its activation and follow the prompts. Tactical Defense is offered at attack declaration, before damage. Gold push-direction buttons also allow selecting off-board collision directions.
+
+Builds and the unlocked Bound Soul are saved locally; an encounter itself is not saved. Browser saves are specific to that site's origin. Victory unlocks the 6-HP, three-Blank reward Soul: once each turn, spend one Action Blank to Move 1. An Alternative-Soul build must be refitted before using that reward. Defeat supports a clean restart without campaign penalties.
+
+### Presentation
+
+Original procedurally drawn pixel heroes, a twisted humanoid boss, a ruined cathedral title scene, eclipse, limited dark-fantasy palette, crisp rune UI, animated rolling, embers, slash streaks, block/healing bursts, floating combat text, screen shake, procedural chip effects and an eight-second looping ambient score. Art and audio are self-contained.
+
+## Development and tests
+
+```sh
+godot --headless --path . --editor --import
+godot --headless --path . --script res://tests/test_game.gd
+godot --path .
+```
+
+Use a Godot 4.7 binary for `godot` in these examples. On the prepared cloud machine it is `/workspace/.godot-dev/tools/4.7/Godot_v4.7-stable_linux.x86_64`. Writable XDG cache/config/data directories are already prepared under `/workspace/.godot-dev`.
+
+Tests cover construction, ownership, fixed initiative, footprint range, occupied-square movement, exact starter effects, protection and recovery, stored Reactions, Fracture, shortest boss routes, collisions, Soul use, and encounter completion. A controlled legal-roll fixture checks a full winning fight; 20 deterministic random fights exercise termination and losing outcomes. These tests establish behavior, not balance. The simple benchmark player loses frequently; the prototype's original numbers remain unchanged for designer playtesting.
+
+`tests/capture.gd` captures the rendered title, builder, and battle using a graphical display. `tests/balance.gd` is an exploratory benchmark, not a passing/failing balance requirement. `export_presets.cfg` contains release presets for Web, Linux, and Windows. Install the corresponding official 4.7 export templates before exporting.
+
+See [RULES_MAPPING.md](RULES_MAPPING.md) for scope, exact implementation choices, and deferred content. Godot and DejaVu license notices are included in `assets/` and in the binary downloads.
+
+To regenerate the single-file browser build after a Web export:
+
+```sh
+python3 tools/build_standalone.py ../dicebound-builds/web ../dicebound-downloads/Play-Dicebound.html
+```
+
+## GitHub Pages publication
+
+The prebuilt browser game is in `docs/index.html`. It embeds every runtime asset and works on a standard HTTPS static site. `docs/.nojekyll` keeps GitHub Pages from processing it as a Jekyll project.
+
+Publish this repository as `dicebound`. In GitHub **Settings → Pages**, choose **Deploy from a branch**, branch **main**, folder **/docs**. The deployment does not require an Actions build, Godot installation, or external asset hosting. After GitHub reports a successful deployment, use the HTTPS URL shown by Pages.
+
+To update the site, re-export the Web build and run `tools/build_standalone.py`, with `docs/index.html` as the output. Commit that file and push the main branch.

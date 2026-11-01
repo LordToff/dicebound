@@ -15,6 +15,7 @@ func _initialize() -> void:
 func run() -> void:
 	game = load("res://main.tscn").instantiate()
 	game.save_enabled = false
+	game.sound_on = false
 	root.add_child(game)
 	await process_frame
 	game.sound_on = false

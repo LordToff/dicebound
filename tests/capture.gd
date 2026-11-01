@@ -4,6 +4,7 @@ func _initialize() -> void:
 func run() -> void:
 	var game = load("res://main.tscn").instantiate()
 	game.save_enabled = false
+	game.sound_on = false
 	root.add_child(game)
 	game.sound_on = false
 	game.music.stop()

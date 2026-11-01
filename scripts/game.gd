@@ -10,11 +10,11 @@ const RED = Color("e66d78")
 const TEAL = Color("73d2bd")
 const COLORS = [Color("79b9df"), Color("dd997c"), Color("b39bdf")]
 const NAMES = ["CAIRN", "EMBER", "VESPER"]
-const FACES = ["Blank", "Basic Strike", "Basic Movement", "Tactical Movement", "Basic Defense", "Tactical Defense", "Focus", "First Aid", "Shove"]
-const LIMITS = [18, 4, 2, 1, 2, 1, 1, 1, 1]
-const CATS = ["Blank", "Attack", "Movement", "Movement", "Defense", "Defense", "Skill", "Skill", "Skill"]
-const SIGNS = ["-", "ATK", "MOV", "DASH", "BLK", "REACT", "FOCUS", "HEAL", "PUSH"]
-const DESCS = ["No effect. A quiet face, waiting for a soul.", "Deal 1 damage to an adjacent unit. Block absorbs damage.", "Move up to 1 orthogonal square. No diagonal movement.", "Move up to 3 squares in a single straight line.", "Gain 1 Block. Unused Block expires at your next turn start.", "Reaction: when targeted, gain 1 Block and optionally step 1.", "Reroll one OTHER unresolved Action Die during your turn.", "Heal yourself or an adjacent hero 1 HP. Revives Downed heroes.", "Push an adjacent unit 1 square directly away. No collision penalty."]
+const FACES = ["Blank", "Basic Strike", "Basic Movement", "Tactical Movement", "Basic Defense", "Tactical Defense", "Focus", "First Aid", "Shove", "Lantern Cut", "Iron Ward", "Pilgrim Step", "Cursed Blank"]
+const LIMITS = [18, 4, 2, 1, 2, 1, 1, 1, 1, 0, 0, 0, 0]
+const CATS = ["Blank", "Attack", "Movement", "Movement", "Defense", "Defense", "Skill", "Skill", "Skill", "Attack", "Defense", "Movement", "Blank"]
+const SIGNS = ["-", "ATK", "MOV", "DASH", "BLK", "REACT", "FOCUS", "HEAL", "PUSH", "CUT", "WARD", "STEP2", "CURSE"]
+const DESCS = ["No effect. A quiet face, waiting for a soul.", "Deal 1 damage to an adjacent unit. Block absorbs damage.", "Move up to 1 orthogonal square. No diagonal movement.", "Move up to 3 squares in a single straight line.", "Gain 1 Block. Unused Block expires at your next turn start.", "Reaction: when targeted, gain 1 Block and optionally step 1.", "Reroll one OTHER unresolved Action Die during your turn.", "Heal yourself or an adjacent hero 1 HP. Revives Downed heroes.", "Push an adjacent unit 1 square directly away. No collision penalty.", "TEST REWARD / Deal 2 damage to an adjacent unit. Cost: one rolled die.", "TEST REWARD / Gain 2 Block until your next turn starts.", "TEST REWARD / Move up to 2 orthogonal squares; you may turn.", "A permanent, locked Blank. Counts toward Soul minima. Cleanse it at an event to unlock it."]
 const BOSS_DICE = [["Advance", "Advance", "Strike", "Strike", "Brace", "Drive Back"], ["Advance", "Skirmish", "Strike", "Sweep", "Brace", "Distort"], ["Advance", "Skirmish", "Strike", "Sweep", "Drive Back", "Fracture"]]
 const BOARD = Vector2(66, 192)
 const CELL = 54
@@ -67,9 +67,20 @@ var save_enabled = true
 var build_slot = 0
 var armed_die = -1
 var end_confirm = false
+var owned_faces: Array = []
+var event_pool: Array = [0, 1, 2, 3, 4, 5]
+var journey_stage = "prepare"
+var trip_hp: Array = [6, 6, 6]
+var current_event = -1
+var event_target = 0
+var event_die = 0
+var event_risk_die = 0
+var event_outcome = ""
+var event_journal: Array = []
+var pool_page = 0
 var hurt_timers = {}
-const POWER = ["NO ACTION", "1 DAMAGE", "MOVE 1", "MOVE 3", "+1 BLOCK", "BLOCK + STEP", "REROLL 1", "+1 HP", "PUSH 1"]
-const SHORT_NAMES = ["Blank", "Basic Strike", "Step", "Tactical Dash", "Guard", "Tactical Defense", "Focus", "First Aid", "Shove"]
+const POWER = ["NO ACTION", "1 DAMAGE", "MOVE 1", "MOVE 3", "+1 BLOCK", "BLOCK + STEP", "REROLL 1", "+1 HP", "PUSH 1", "2 DAMAGE", "+2 BLOCK", "MOVE 2", "LOCKED BLANK"]
+const SHORT_NAMES = ["Blank", "Basic Strike", "Step", "Tactical Dash", "Guard", "Tactical Defense", "Focus", "First Aid", "Shove", "Lantern Cut", "Iron Ward", "Pilgrim Step", "Cursed Blank"]
 const BOSS_TIPS = {"Advance":"Move up to 2 toward the closest hero.", "Skirmish":"Move 1, then attack an adjacent hero for 1.", "Strike":"2 damage to the closest adjacent hero.", "Sweep":"1 damage to EVERY adjacent hero, including Downed.", "Brace":"Gain 2 Block until the next boss turn.", "Drive Back":"1 damage, then push 1. Collisions deal 1 + Stunned.", "Distort":"Closest hero within 2: Weakness 1 until boss next turn.", "Fracture":"An adjacent hero chooses an ability face to lose temporarily."}
 
 func _ready() -> void:
@@ -78,6 +89,7 @@ func _ready() -> void:
 	rng.randomize()
 	for h in range(3):
 		builds.append([1, 2, 4, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 6, 0, 0, 0])
+		owned_faces.append(LIMITS.duplicate())
 	load_progress()
 	audio = AudioStreamPlayer.new()
 	add_child(audio)
@@ -86,7 +98,7 @@ func _ready() -> void:
 	music.volume_db = -12
 	music.stream = load("res://assets/tribunal.ogg")
 	music.stream.loop = true
-	music.play()
+	if sound_on: music.play()
 	set_process(true)
 	queue_redraw()
 
@@ -101,6 +113,7 @@ func load_progress() -> void:
 	if blank_min not in [2, 3]: blank_min = 3
 	reward = bool(config.get_value("party", "reward", false))
 	battles_won = int(config.get_value("party", "wins", 0))
+	load_journey(config)
 
 func save_progress() -> void:
 	if not save_enabled: return
@@ -109,6 +122,7 @@ func save_progress() -> void:
 	config.set_value("party", "blanks", blank_min)
 	config.set_value("party", "reward", reward)
 	config.set_value("party", "wins", battles_won)
+	write_journey(config)
 	config.save("user://dicebound.cfg")
 
 func sfx(kind: String) -> void:
@@ -204,6 +218,10 @@ func _draw() -> void:
 		draw_battle()
 	elif screen == "result":
 		draw_result()
+	elif screen == "camp":
+		draw_camp()
+	elif screen == "event":
+		draw_event()
 	if screen != "title":
 		button(Rect2(1100, 27, 64, 30), "RULES", "help", true, MUTED)
 	button(Rect2(1176, 27, 74, 30), "SOUND" if sound_on else "MUTED", "sound", true, MUTED, "Toggle the soundtrack and sound effects.")
@@ -266,7 +284,8 @@ func draw_title() -> void:
 	wrapped(Vector2(78, 338), "Three fractured souls. Eighteen carved faces. One creature that remembers what you were.", 43, MUTED, 18)
 	button(Rect2(78, 452, 360, 58), "CARVE YOUR DICE  >", "build", true, GOLD)
 	button(Rect2(78, 526, 174, 44), "HOW TO PLAY", "help", true, MUTED)
-	button(Rect2(266, 526, 172, 44), "QUICK BATTLE", "quick", true, TEAL)
+	button(Rect2(266, 526, 172, 44), "NEW JOURNEY", "quick", true, TEAL)
+	button(Rect2(78, 590, 360, 36), "CAMP / TEST SIX EVENTS", "camp", true, COLORS[2])
 	text_at(Vector2(78, 647), "BUILD / ROLL / POSITION / SURVIVE", 15, MUTED)
 	text_at(Vector2(78, 679), "16-BIT ORIGINAL ART  +  PROCEDURAL CHIP AUDIO", 12, MUTED.darkened(0.15))
 	text_at(Vector2(78, 761), "LOCAL THREE-HERO PLAY   ·   BASED ON YOUR OCT 31 RULES", 13, MUTED)
@@ -337,7 +356,7 @@ func draw_build() -> void:
 		button(Rect2(104 + i * 208, 263, 196, 29), label.to_upper() + " PRESET", "preset:" + label, true, COLORS[builder])
 	for d in range(3):
 		var y = 310 + d * 100
-		var n = 6 - builds[builder].slice(d * 6, d * 6 + 6).count(0)
+		var n = 6 - blank_sides(builds[builder].slice(d * 6, d * 6 + 6))
 		text_at(Vector2(47, y + 28), ["I", "II", "III"][d], 18, GOLD)
 		text_at(Vector2(42, y + 49), "%d%%" % roundi(n / 6.0 * 100), 11, MUTED)
 		for side in range(6):
@@ -345,16 +364,20 @@ func draw_build() -> void:
 			var face: int = builds[builder][index]
 			die(Rect2(105 + side * 104, y, 92, 78), face, "slot:%d" % index, false, build_slot == index)
 	box(Rect2(790, 160, 444, 487))
-	text_at(Vector2(810, 190), "CHOOSE A FACE FOR DIE %s / SIDE %d" % [["I", "II", "III"][build_slot / 6], build_slot % 6 + 1], 13, GOLD)
-	for f in range(1, 9):
-		var r = Rect2(808 + ((f - 1) % 2) * 207, 207 + ((f - 1) / 2) * 72, 196, 63)
+	button(Rect2(809, 169, 196, 28), "STARTER FACES", "pool_starter", true, GOLD if pool_page == 0 else MUTED)
+	button(Rect2(1016, 169, 196, 28), "FOUND FACES", "pool_found", true, GOLD if pool_page == 1 else MUTED)
+	var shown_faces = range(1, 9) if pool_page == 0 else [9, 10, 11]
+	for i in range(shown_faces.size()):
+		var f: int = shown_faces[i]
+		var r = Rect2(808 + (i % 2) * 207, 207 + (i / 2) * 72, 196, 63)
 		var color = face_color(f)
 		var count = builds[builder].count(f)
-		var enabled = count < LIMITS[f] or LIMITS[f] == 1 or builds[builder][build_slot] == f
+		var capacity = face_capacity(builder, f)
+		var enabled = capacity > 0 and (count < capacity or capacity == 1 or builds[builder][build_slot] == f)
 		box(r, color.darkened(0.86), GOLD if paint_face == f else color.darkened(0.4))
 		text_at(r.position + Vector2(10, 19), SHORT_NAMES[f], 13, INK if enabled else MUTED)
 		text_at(r.position + Vector2(10, 43), POWER[f], 13, color)
-		text_at(r.position + Vector2(144, 56), "%d/%d" % [count, LIMITS[f]], 10, MUTED)
+		text_at(r.position + Vector2(144, 56), "%d/%d" % [count, capacity], 10, MUTED)
 		if enabled: hits.append({"r": r, "id": "paint:%d" % f})
 		if r.has_point(get_local_mouse_position()): hover_tip = FACES[f] + ": " + DESCS[f]
 	button(Rect2(809, 502, 402, 30), "CLEAR SIDE / INSTALL BLANK", "paint:0", true, MUTED)
@@ -370,13 +393,13 @@ func draw_build() -> void:
 	var legal = true
 	for h in range(3):
 		if not build_error(h).is_empty(): legal = false
-	button(Rect2(792, 665, 440, 47), "ENTER THE TRIBUNAL  >", "start", legal)
+	button(Rect2(792, 665, 440, 47), "VENTURE OUT / ROLL EVENT  >", "start", legal)
 
 func face_color(face: int) -> Color:
-	if face == 1: return RED
-	if face in [2, 3]: return TEAL
-	if face in [4, 5]: return COLORS[0]
-	if face in [6, 7, 8]: return COLORS[2]
+	if face in [1, 9]: return RED
+	if face in [2, 3, 11]: return TEAL
+	if face in [4, 5, 10]: return COLORS[0]
+	if face in [6, 7, 8, 12]: return COLORS[2]
 	return MUTED
 
 func die(r: Rect2, face: int, id: String, spent: bool, chosen: bool) -> void:
@@ -385,14 +408,14 @@ func die(r: Rect2, face: int, id: String, spent: bool, chosen: bool) -> void:
 	var center = r.position + r.size / 2
 	var alpha = 0.3 if spent else 1.0
 	var icon_color = Color(color, alpha)
-	if face == 1:
+	if face in [1, 9]:
 		draw_line(center + Vector2(-12, 8), center + Vector2(10, -14), icon_color, 4)
 		draw_line(center + Vector2(-13, -1), center + Vector2(-2, 10), icon_color, 3)
-	elif face in [2, 3]:
+	elif face in [2, 3, 11]:
 		for k in range(2 if face == 3 else 1):
 			var x = center.x - 8 + k * 12
 			draw_polyline(PackedVector2Array([Vector2(x - 4, center.y - 12), Vector2(x + 5, center.y - 4), Vector2(x - 4, center.y + 4)]), icon_color, 3)
-	elif face in [4, 5]:
+	elif face in [4, 5, 10]:
 		draw_colored_polygon(PackedVector2Array([center + Vector2(-12, -14), center + Vector2(12, -14), center + Vector2(10, 0), center + Vector2(0, 9), center + Vector2(-10, 0)]), icon_color)
 		if face == 5: text_at(center + Vector2(-4, 1), "!", 16, BG)
 	elif face == 7:
@@ -416,10 +439,10 @@ func build_error(h: int) -> String:
 	for d in range(3):
 		var n = 0
 		for s in range(6):
-			if builds[h][d * 6 + s] == 0: n += 1
+			if builds[h][d * 6 + s] in [0, 12]: n += 1
 		if n < blank_min: return "Die %s needs %d Blank sides." % [["I", "II", "III"][d], blank_min]
-	for f in range(1, 9):
-		if builds[h].count(f) > LIMITS[f]: return "Not enough owned copies of " + FACES[f]
+	for f in range(1, FACES.size()):
+		if builds[h].count(f) > face_capacity(h, f): return "Not enough owned copies of " + FACES[f]
 	for category in ["Movement", "Defense", "Skill"]:
 		var n = 0
 		for f in builds[h]:
@@ -428,6 +451,10 @@ func build_error(h: int) -> String:
 	return ""
 
 func start_battle() -> void:
+	if journey_stage == "event":
+		screen = "event"
+		notify("Choose an event outcome before entering battle.")
+		return
 	if reward: blank_min = 3
 	for h in range(3):
 		if not build_error(h).is_empty():
@@ -435,6 +462,8 @@ func start_battle() -> void:
 			builder = h
 			notify("Refit " + NAMES[h] + ": " + build_error(h))
 			return
+	var preserve_event = journey_stage in ["resolved", "battle"]
+	if preserve_event: journey_stage = "battle"
 	save_progress()
 	screen = "battle"
 	boss = {"pos": Vector2i(3, 2), "hp": 18, "block": 0}
@@ -445,7 +474,7 @@ func start_battle() -> void:
 	recovery.clear()
 	recovery_active = false
 	for h in range(3):
-		heroes.append({"pos": Vector2i(2 + h * 2, 6), "hp": 6, "block": 0, "down": false, "dead": false, "broken": false, "protected": false, "weak": false, "stun": false, "dice": builds[h].duplicate(), "roll": [], "spent": [false, false, false], "react": [], "acted": false, "soul_used": false})
+		heroes.append({"pos": Vector2i(2 + h * 2, 6), "hp": trip_hp[h] if preserve_event else 6, "block": 0, "down": false, "dead": false, "broken": false, "protected": false, "weak": false, "stun": false, "dice": builds[h].duplicate(), "roll": [], "spent": [false, false, false], "react": [], "acted": false, "soul_used": false})
 		initiative.append(rng.randi_range(1, 6))
 	initiative.append(rng.randi_range(1, 6))
 	order = [0, 1, 2, 3]
@@ -631,19 +660,20 @@ func select_die(d: int) -> void:
 	mode = ""
 	reachable.clear()
 	match face:
-		0:
+		0, 12:
 			if reward and not u.soul_used:
 				mode = "move_soul"
 				reachable = movement_options(active, 1)
 			else:
 				consume()
-		1: mode = "attack"
-		2, 3:
+		1, 9: mode = "attack"
+		2, 3, 11:
 			mode = "move"
-			reachable = movement_options(active, 3 if face == 3 else 1, face == 3)
-		4:
-			u.block += 1
-			float_text(active, "+1 BLOCK", COLORS[0])
+			reachable = movement_options(active, 3 if face == 3 else (2 if face == 11 else 1), face == 3)
+		4, 10:
+			var gained = 2 if face == 10 else 1
+			u.block += gained
+			float_text(active, "+%d BLOCK" % gained, COLORS[0])
 			emit(unit_center(active), COLORS[0], 22)
 			sfx("block")
 			consume()
@@ -700,9 +730,9 @@ func board_click(p: Vector2i) -> void:
 		else: notify("Choose a highlighted square. Pieces and edges block movement.")
 	elif mode == "attack":
 		if target >= 0 and target != active and distance(heroes[active].pos, unit_pos(target), 2 if target == 3 else 1) == 1:
-			var amount = 0 if heroes[active].weak else 1
+			var amount = attack_value(active, heroes[active].dice[selected * 6 + heroes[active].roll[selected]])
 			damage(target, amount)
-			say(NAMES[active] + " uses Basic Strike for %d." % amount)
+			say(NAMES[active] + " attacks for %d." % amount)
 			consume()
 		else: notify("Basic Strike needs an adjacent unit (edge contact).")
 	elif mode == "heal":
@@ -782,12 +812,15 @@ func check_end() -> bool:
 	if not alive or boss.hp <= 0:
 		victory = alive and boss.hp <= 0
 		screen = "result"
+		journey_stage = "aftermath"
 		if victory:
 			battles_won += 1
 			reward = true
 			save_progress()
 			sfx("heal")
-		else: sfx("hit")
+		else:
+			save_progress()
+			sfx("hit")
 		return true
 	return false
 
@@ -829,7 +862,7 @@ func resolve_boss() -> void:
 				float_text(target, "WEAKNESS", COLORS[2])
 				boss_complete()
 		"Fracture":
-			var targets = eligible(1).filter(func(h): return heroes[h].dice.any(func(f): return f != 0))
+			var targets = eligible(1).filter(func(h): return heroes[h].dice.any(func(f): return f not in [0, 12]))
 			var target = closest(targets)
 			if target < 0: fallback()
 			else:
@@ -976,12 +1009,12 @@ func draw_battle() -> void:
 	var hover_die = hovered_die()
 	if selected < 0 and hover_die >= 0 and active < 3 and not heroes[active].spent[hover_die] and mode.is_empty():
 		var f: int = heroes[active].dice[hover_die * 6 + heroes[active].roll[hover_die]]
-		if f in [2, 3]: display_reachable = movement_options(active, 3 if f == 3 else 1, f == 3)
-		elif f == 1: visual_mode = "attack"
+		if f in [2, 3, 11]: display_reachable = movement_options(active, 3 if f == 3 else (2 if f == 11 else 1), f == 3)
+		elif f in [1, 9]: visual_mode = "attack"
 		elif f == 7: visual_mode = "heal"
 		elif f == 8: visual_mode = "shove"
 	text_at(Vector2(44, 52), "DICEBOUND", 24, GOLD)
-	text_at(Vector2(267, 49), "THE HOLLOW TRIBUNAL / v0.2", 14, MUTED)
+	text_at(Vector2(267, 49), "THE HOLLOW TRIBUNAL / v0.3", 14, MUTED)
 	text_at(Vector2(44, 92), "ROUND %02d" % round_no, 20, INK)
 	text_at(Vector2(230, 91), "FIXED INITIATIVE", 12, MUTED)
 	for i in range(4):
@@ -1111,7 +1144,7 @@ func draw_boss_console() -> void:
 			for s in range(6):
 				var slot = d * 6 + s
 				var f: int = heroes[pending.target].dice[slot]
-				if f != 0:
+				if f not in [0, 12]:
 					button(Rect2(610 + s * 98, 345 + d * 49, 90, 39), SIGNS[f], "fracture:%d" % slot, true, face_color(f))
 	elif mode == "boss_move":
 		button(Rect2(610, 384, 584, 42), "CHOOSE A ROUTE FOR ME", "auto_move", true, TEAL)
@@ -1135,16 +1168,16 @@ func draw_result() -> void:
 	if victory and blank_min == 2:
 		wrapped(Vector2(68, 591), "Reward Soul requires three Blanks per die. Rebuild legally before the rematch; no two-Blank reward Soul is used.", 95, GOLD, 15)
 	else:
-		wrapped(Vector2(68, 591), "Every encounter is a new arrangement of fate. Return to your dice, change your approach, and enter the arena again.", 95, MUTED, 15)
-	button(Rect2(67, 665, 356, 52), "RETURN TO DICE BUILDER", "return_build", true, GOLD)
-	button(Rect2(445, 665, 356, 52), "REMATCH", "rematch", not victory or blank_min == 3, TEAL)
+		wrapped(Vector2(68, 591), "Recover at camp, rebuild your dice, then resolve an event before the next fight. Event injuries and curses carry into battle.", 95, MUTED, 15)
+	button(Rect2(67, 665, 356, 52), "PREPARE NEXT JOURNEY", "return_build", true, GOLD)
+	button(Rect2(445, 665, 356, 52), "CAMP / EVENTS", "camp", true, TEAL)
 	button(Rect2(823, 665, 356, 52), "TITLE", "title", true, MUTED)
 
 func draw_help() -> void:
 	draw_rect(Rect2(0, 0, 1280, 800), Color(0.02, 0.03, 0.06, 0.92))
 	box(Rect2(145, 65, 990, 670), PANEL, GOLD)
 	text_at(Vector2(176, 111), "THE FIELD GUIDE", 28, GOLD)
-	var lines = ["01  BUILD: three mixed six-sided dice per hero. Own copies matter.", "    Original Soul: at least 3 Blanks per die. Body caps: M3 / D3 / S3.", "02  ROLL: everyone rolls together each round. Initiative stays fixed.", "03  ACT: click a die, then a highlighted square or legal target.", "    Basic Strike = 1 damage. First Aid = 1 heal. No Numeric rolls.", "04  POSITION: orthogonal movement only. Boss occupies 2 x 2 squares.", "    Tactical Movement travels up to 3 in one straight direction.", "05  REACT: Tactical Defense stores automatically. Gain 1 Block and", "    optionally step when attacked. Unused Reactions expire next roll.", "06  SURVIVE: Block absorbs damage, expires at your own turn start.", "    At 0 HP: Downed. First Aid revives with Broken + a recovery turn.", "    A Broken hero reaching 0 dies. All Downed/dead = immediate loss.", "07  BOSS: resolve I, II, III. You choose legal routes, push directions", "    and the face lost to Fracture. Enemy intentions are public.", "08  WIN: reduce the boss's 18 HP to zero. Earn a Bound Move-1 Soul.", "", "CONTROLS  Mouse: select/use   1/2/3: dice   E: end turn   Esc: cancel/help", "", "Digital adaptation: one person controls all three heroes; hero ties", "use roster order. Deployment is a prototype choice. Full campaign", "events and extended catalogue faces are outside this first encounter."]
+	var lines = ["01  BUILD: three mixed six-sided dice per hero. Own copies matter.", "    Original Soul: at least 3 Blanks per die. Body caps: M3 / D3 / S3.", "02  ROLL: everyone rolls together each round. Initiative stays fixed.", "03  ACT: click a die, then a highlighted square or legal target.", "    Basic Strike = 1 damage. First Aid = 1 heal. No Numeric rolls.", "04  POSITION: orthogonal movement only. Boss occupies 2 x 2 squares.", "    Tactical Movement travels up to 3 in one straight direction.", "05  REACT: Tactical Defense stores automatically. Gain 1 Block and", "    optionally step when attacked. Unused Reactions expire next roll.", "06  SURVIVE: Block absorbs damage, expires at your own turn start.", "    At 0 HP: Downed. First Aid revives with Broken + a recovery turn.", "    A Broken hero reaching 0 dies. All Downed/dead = immediate loss.", "07  BOSS: resolve I, II, III. You choose legal routes, push directions", "    and the face lost to Fracture. Enemy intentions are public.", "08  WIN: reduce the boss's 18 HP to zero. Earn a Bound Move-1 Soul.", "", "CONTROLS  Mouse: select/use   1/2/3: dice   E: end turn   Esc: cancel/help", "", "One local player controls all three heroes. Hero ties use roster order.", "JOURNEY: prepare, resolve an event, then fight with its injuries.", "New rewards equip NEXT preparation. Cursed Blanks stay locked."]
 	for i in range(lines.size()): text_at(Vector2(177, 152 + i * 24), lines[i], 14, MUTED if i > 16 else INK)
 	button(Rect2(853, 677, 245, 39), "BACK TO THE FIRE", "help", true, GOLD)
 
@@ -1197,22 +1230,26 @@ func handle(id: String) -> void:
 		return
 	if id == "build": screen = "build"
 	elif id == "title": screen = "title"
-	elif id == "quick" or id == "start" or id == "rematch": start_battle()
-	elif id == "return_build":
-		if victory and blank_min == 2:
-			blank_min = 3
-			for h in range(3):
-				for d in range(3):
-					while builds[h].slice(d * 6, d * 6 + 6).count(0) < 3:
-						for s in range(5, -1, -1):
-							if builds[h][d * 6 + s] != 0:
-								builds[h][d * 6 + s] = 0
-								break
-		screen = "build"
+	elif id == "quick" or id == "start" or id == "rematch": venture_out()
+	elif id == "camp": open_camp()
+	elif id == "event_roll": reveal_event()
+	elif id == "event_fight": start_battle()
+	elif id == "pool_starter": pool_page = 0
+	elif id == "pool_found": pool_page = 1
+	elif id == "refill_events": refill_events()
+	elif id.begins_with("test_event:"): reveal_event(int(id.get_slice(":", 1)))
+	elif id.begins_with("event_hero:"):
+		event_target = int(id.get_slice(":", 1))
+		save_progress()
+	elif id.begins_with("event_choice:"): resolve_event(int(id.get_slice(":", 1)))
+	elif id == "return_build": open_preparation()
 	elif id == "soul":
+		if journey_stage in ["event", "resolved", "battle"]:
+			notify("Soul selection is locked for this journey.")
+			return
 		if reward: notify("The reward Soul requires 3 Blanks per die.")
 		else: blank_min = 2 if blank_min == 3 else 3
-	elif id == "reset_build": builds[builder] = [1, 2, 4, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 6, 0, 0, 0]
+	elif id == "reset_build": apply_preset("Balanced")
 	elif id.begins_with("hero:"): builder = int(id.get_slice(":", 1))
 	elif id.begins_with("paint:"):
 		paint_face = int(id.get_slice(":", 1))
@@ -1256,6 +1293,7 @@ func handle(id: String) -> void:
 	elif id.begins_with("fracture:"):
 		var slot = int(id.get_slice(":", 1))
 		var h: int = pending.target
+		if heroes[h].dice[slot] in [0, 12]: return
 		heroes[h].dice[slot] = 0
 		for d in range(3):
 			if d * 6 + heroes[h].roll[d] == slot:
@@ -1277,7 +1315,7 @@ func choose_ability(d: int) -> void:
 	end_confirm = false
 	armed_die = -1
 	var f: int = u.dice[d * 6 + u.roll[d]]
-	if f in [4, 6] or (f == 0 and (not reward or u.soul_used)):
+	if f in [4, 6, 10] or (f in [0, 12] and (not reward or u.soul_used)):
 		selected = d
 		armed_die = d
 		mode = "confirm"
@@ -1292,7 +1330,7 @@ func ready_action_count() -> int:
 	var count = 0
 	for d in unresolved(active):
 		var f: int = heroes[active].dice[d * 6 + heroes[active].roll[d]]
-		if f != 0 or (reward and not heroes[active].soul_used): count += 1
+		if f not in [0, 12] or (reward and not heroes[active].soul_used): count += 1
 	return count
 
 func request_end_turn() -> void:
@@ -1313,7 +1351,7 @@ func legal_ability_targets(f: int) -> Array:
 		if h < 3 and heroes[h].dead: continue
 		var dist = distance(heroes[active].pos, unit_pos(h), 2 if h == 3 else 1)
 		if f == 7 and h < 3 and dist <= 1: targets.append(h)
-		if f in [1, 8] and h != active and dist == 1: targets.append(h)
+		if f in [1, 8, 9] and h != active and dist == 1: targets.append(h)
 	return targets
 
 func draw_ability_card(d: int) -> void:
@@ -1329,15 +1367,15 @@ func draw_ability_card(d: int) -> void:
 	text_at(r.position + Vector2(12, 19), "[%d] %s / DIE %s" % [d + 1, CATS[f].to_upper(), ["I", "II", "III"][d]], 10, color)
 	text_at(r.position + Vector2(12, 43), SHORT_NAMES[f], 15, INK if not spent else MUTED)
 	var value: String = POWER[f]
-	if f == 1 and u.weak: value = "0 DMG / WEAK"
-	if f == 0 and reward and not u.soul_used: value = "SOUL: MOVE 1"
+	if f in [1, 9] and u.weak: value = "%d DMG / WEAK" % attack_value(active, f)
+	if f in [0, 12] and reward and not u.soul_used: value = "SOUL: MOVE 1"
 	if roll_anim > 0: value = ". . ."
 	text_at(r.position + Vector2(12, 77), value, 19, color)
 	var state = "READY / CLICK TO SELECT"
 	if spent: state = "SPENT THIS ROUND"
 	elif stored: state = "STORED / AUTO REACTION"
-	elif f in [1, 8] and legal_ability_targets(f).is_empty(): state = "NO ADJACENT TARGET"
-	elif f == 0 and (not reward or u.soul_used): state = "BLANK / NO EFFECT"
+	elif f in [1, 8, 9] and legal_ability_targets(f).is_empty(): state = "NO ADJACENT TARGET"
+	elif f in [0, 12] and (not reward or u.soul_used): state = "BLANK / NO EFFECT"
 	text_at(r.position + Vector2(12, 103), state, 10, GOLD if stored else MUTED)
 	draw_line(r.position + Vector2(12, 115), r.position + Vector2(176, 115), EDGE, 1)
 	text_at(r.position + Vector2(12, 133), "COST: 1 ROLLED DIE" if not stored else "SPENDS WHEN TRIGGERED", 10, color)
@@ -1375,8 +1413,8 @@ func draw_hero_console() -> void:
 	text_at(Vector2(610, 439), instruction, 13, GOLD)
 	if mode == "push_direction": return
 	if mode == "confirm":
-		text_at(Vector2(610, 462), "Gain 1 Block until your next turn. Spend this die." if f == 4 else ("Spend Focus, then replace another ready die with a new roll." if f == 6 else "Discard this Blank without an effect. No HP cost."), 12, MUTED)
-		var label = "GAIN 1 BLOCK" if f == 4 else ("SPEND FOCUS / CHOOSE REROLL" if f == 6 else "DISCARD BLANK")
+		text_at(Vector2(610, 462), "Gain %d Block until your next turn. Spend this die." % (2 if f == 10 else 1) if f in [4, 10] else ("Spend Focus, then replace another ready die with a new roll." if f == 6 else "Discard this Blank without an effect. No HP cost."), 12, MUTED)
+		var label = "GAIN %d BLOCK" % (2 if f == 10 else 1) if f in [4, 10] else ("SPEND FOCUS / CHOOSE REROLL" if f == 6 else "DISCARD BLANK")
 		button(Rect2(610, 478, 397, 37), label, "activate", true, face_color(f))
 		button(Rect2(1020, 478, 190, 37), "CANCEL / FREE", "cancel_ability", true, MUTED)
 	elif mode in ["attack", "heal", "shove"]:
@@ -1388,9 +1426,9 @@ func draw_hero_console() -> void:
 				var h: int = targets[i]
 				var name_text = "HOLLOW ONE" if h == 3 else NAMES[h]
 				var label = name_text
-				if f == 1:
+				if f in [1, 9]:
 					var unit: Dictionary = boss if h == 3 else heroes[h]
-					var amount = 0 if u.weak else 1
+					var amount = attack_value(active, f)
 					label += " -%d HP" % maxi(0, amount - unit.block)
 				elif f == 7: label += " +%d HP" % mini(1, 6 - heroes[h].hp)
 				button(Rect2(610 + i * 202, 456, 188, 32), label, "target:%d" % h, true, face_color(f))
@@ -1402,11 +1440,17 @@ func draw_hero_console() -> void:
 		button(Rect2(909, 482, 300, 35), "DISCARD RESULT", "spend", true, MUTED)
 
 func equip_face(slot: int, face: int) -> void:
+	if journey_stage in ["event", "resolved", "battle"]:
+		notify("Builds are committed until this encounter ends.")
+		return
+	if builds[builder][slot] == 12:
+		notify("Cursed Blank is locked. Find an event that cleanses it.")
+		return
 	var previous: Array = builds[builder].duplicate()
 	var old: int = builds[builder][slot]
 	var swapped = false
-	if face != old and face != 0 and builds[builder].count(face) >= LIMITS[face]:
-		if LIMITS[face] == 1:
+	if face != old and face != 0 and builds[builder].count(face) >= face_capacity(builder, face):
+		if face_capacity(builder, face) == 1:
 			var source: int = builds[builder].find(face)
 			builds[builder][source] = old
 			swapped = true
@@ -1420,11 +1464,380 @@ func equip_face(slot: int, face: int) -> void:
 	notify(("Moved your owned " if swapped else "Equipped ") + FACES[face] + (" / previous sides swapped." if swapped else ". No HP or gold cost."))
 
 func apply_preset(which: String) -> void:
+	if journey_stage in ["event", "resolved", "battle"]:
+		notify("Builds are committed until this encounter ends.")
+		return
+	var previous: Array = builds[builder].duplicate()
 	match which:
 		"Assault": builds[builder] = [1, 1, 2, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 2, 0, 0, 0]
 		"Support": builds[builder] = [1, 2, 4, 0, 0, 0, 7, 3, 5, 0, 0, 0, 6, 8, 2, 0, 0, 0]
 		_: builds[builder] = [1, 2, 4, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 6, 0, 0, 0]
+	for slot in range(18):
+		if previous[slot] == 12: builds[builder][slot] = 12
+	if not build_error(builder).is_empty():
+		builds[builder] = previous
+		notify("That preset needs faces you no longer own. Edit sides manually.")
+		return
 	build_slot = 0
 	paint_face = builds[builder][0]
 	sfx("carve")
 	notify(which + " preset equipped. All ownership and Soul limits checked.")
+
+# --- Between-encounter journey and original test events ---
+func face_capacity(h: int, face: int) -> int:
+	return owned_faces[h][face] if owned_faces.size() == 3 else LIMITS[face]
+
+func blank_sides(sides: Array) -> int:
+	return sides.count(0) + sides.count(12)
+
+func attack_value(h: int, face: int) -> int:
+	return maxi(0, (2 if face == 9 else 1) - (1 if heroes[h].weak else 0))
+
+func write_journey(config: ConfigFile) -> void:
+	config.set_value("journey", "version", 1)
+	config.set_value("journey", "owned", owned_faces.duplicate(true))
+	config.set_value("journey", "pool", event_pool.duplicate())
+	config.set_value("journey", "stage", journey_stage)
+	config.set_value("journey", "hp", trip_hp.duplicate())
+	config.set_value("journey", "current", current_event)
+	config.set_value("journey", "target", event_target)
+	config.set_value("journey", "die", event_die)
+	config.set_value("journey", "risk", event_risk_die)
+	config.set_value("journey", "outcome", event_outcome)
+	config.set_value("journey", "journal", event_journal.duplicate())
+
+func load_journey(config: ConfigFile) -> void:
+	var stored = config.get_value("journey", "owned", [])
+	if stored is Array and stored.size() == 3:
+		for h in range(3):
+			if stored[h] is Array and stored[h].size() == FACES.size() and stored[h].all(func(n): return n is int and n >= 0): owned_faces[h] = stored[h].duplicate()
+	var pool = config.get_value("journey", "pool", [0, 1, 2, 3, 4, 5])
+	if pool is Array:
+		event_pool = []
+		for id in pool:
+			if id is int and id >= 0 and id < 6 and not id in event_pool: event_pool.append(id)
+	var hp = config.get_value("journey", "hp", [6, 6, 6])
+	if hp is Array and hp.size() == 3 and hp.all(func(n): return n is int and n >= 1 and n <= 6): trip_hp = hp.duplicate()
+	journey_stage = str(config.get_value("journey", "stage", "prepare"))
+	if journey_stage not in ["prepare", "event", "resolved", "battle", "aftermath"]: journey_stage = "prepare"
+	current_event = clampi(int(config.get_value("journey", "current", -1)), -1, 5)
+	event_target = clampi(int(config.get_value("journey", "target", 0)), 0, 2)
+	event_die = clampi(int(config.get_value("journey", "die", 0)), 0, 6)
+	event_risk_die = clampi(int(config.get_value("journey", "risk", 0)), 0, 6)
+	event_outcome = str(config.get_value("journey", "outcome", "")).left(2000)
+	var journal = config.get_value("journey", "journal", [])
+	if journal is Array:
+		event_journal = []
+		for entry in journal.slice(0, 20): event_journal.append(str(entry).left(500))
+	if journey_stage in ["event", "resolved"] and current_event < 0: journey_stage = "prepare"
+
+func recover_for_preparation() -> void:
+	if journey_stage not in ["aftermath", "prepare"]: return
+	trip_hp = [6, 6, 6]
+	journey_stage = "prepare"
+	current_event = -1
+	event_die = 0
+	event_risk_die = 0
+	event_outcome = ""
+	if reward:
+		blank_min = 3
+		for h in range(3):
+			for d in range(3):
+				while blank_sides(builds[h].slice(d * 6, d * 6 + 6)) < 3:
+					var removed = false
+					for side in range(5, -1, -1):
+						var slot = d * 6 + side
+						if builds[h][slot] not in [0, 12]:
+							builds[h][slot] = 0
+							removed = true
+							break
+					if not removed: break
+
+func open_preparation() -> void:
+	if journey_stage in ["event", "resolved"]:
+		screen = "event"
+		notify("The journey is committed. Resolve the event, then fight; no free refitting.")
+		return
+	if journey_stage == "battle":
+		start_battle()
+		return
+	recover_for_preparation()
+	screen = "build"
+	save_progress()
+
+func open_camp() -> void:
+	if journey_stage in ["aftermath", "prepare"]: recover_for_preparation()
+	screen = "camp"
+	save_progress()
+
+func venture_out() -> void:
+	if journey_stage in ["event", "resolved"]:
+		screen = "event"
+		return
+	if journey_stage == "battle":
+		start_battle()
+		return
+	recover_for_preparation()
+	for h in range(3):
+		if not build_error(h).is_empty():
+			builder = h
+			screen = "build"
+			notify(build_error(h))
+			return
+	if event_pool.is_empty():
+		screen = "camp"
+		notify("The Event Pool is empty. Return to base; refill only to start a new test expedition.")
+		return
+	reveal_event()
+
+func reveal_event(chosen_id: int = -1) -> void:
+	if journey_stage in ["event", "resolved"]:
+		screen = "event"
+		return
+	if journey_stage == "battle":
+		notify("Finish the committed encounter before drawing another event.")
+		return
+	recover_for_preparation()
+	for h in range(3):
+		if not build_error(h).is_empty():
+			screen = "build"
+			builder = h
+			notify("Complete a legal build before entering an event.")
+			return
+	if event_pool.is_empty():
+		screen = "camp"
+		return
+	if chosen_id >= 0:
+		if not chosen_id in event_pool:
+			notify("That event has already left this pool.")
+			return
+		current_event = chosen_id
+		event_die = chosen_id + 1
+	else:
+		# Unmapped numbers are rerolled; never renumber the remaining events.
+		while true:
+			event_die = rng.randi_range(1, 6)
+			if event_die - 1 in event_pool:
+				current_event = event_die - 1
+				break
+	journey_stage = "event"
+	event_outcome = ""
+	event_risk_die = 0
+	screen = "event"
+	sfx("roll")
+	save_progress()
+
+func event_choice_allowed(choice: int) -> bool:
+	if journey_stage != "event" or choice not in [0, 1]: return false
+	var h = event_target
+	if current_event == 0 and choice == 0: return trip_hp[h] > 2
+	if current_event == 1 and choice == 1: return trip_hp[h] > 2
+	if current_event == 2:
+		return trip_hp[h] > 2 if choice == 0 else trip_hp.all(func(hp): return hp > 1)
+	if current_event == 3 and choice == 0: return owned_faces[h][1] > 0
+	if current_event == 4 and choice == 1: return trip_hp[h] > 1
+	if current_event == 5 and choice == 1: return trip_hp[h] > 2
+	if (current_event == 1 and choice == 0) or (current_event == 3 and choice == 1) or (current_event == 5 and choice == 0):
+		return builds[h].any(func(f): return f != 12)
+	return true
+
+func grant_event_face(h: int, face: int) -> String:
+	owned_faces[h][face] += 1
+	return NAMES[h] + " permanently owns +1 " + FACES[face] + ". It stays in inventory until the NEXT preparation. "
+
+func event_wound(h: int, value: int) -> String:
+	trip_hp[h] -= value
+	return NAMES[h] + " loses %d HP; enters battle at %d/6. " % [value, trip_hp[h]]
+
+func add_cursed_blank(h: int) -> String:
+	var slot = builds[h].find(0)
+	if slot < 0:
+		for i in range(18):
+			if builds[h][i] != 12:
+				slot = i
+				break
+	if slot < 0: return "No unlocked destination exists; curse placement fails. "
+	builds[h][slot] = 12
+	owned_faces[h][12] += 1
+	return NAMES[h] + " gains a PERMANENT locked Cursed Blank on die %s, side %d. " % [["I", "II", "III"][slot / 6], slot % 6 + 1]
+
+func destroy_basic_strike(h: int) -> String:
+	if owned_faces[h][1] <= 0: return event_wound(h, 1)
+	owned_faces[h][1] -= 1
+	if builds[h].count(1) > owned_faces[h][1]:
+		builds[h][builds[h].find(1)] = 0
+	return NAMES[h] + " permanently loses one owned Basic Strike. A necessary equipped copy becomes Blank. "
+
+func resolve_event(choice: int) -> void:
+	if not event_choice_allowed(choice):
+		notify("Cannot pay this choice's printed cost. Choose another hero or option.")
+		return
+	var h = event_target
+	var outcome = ""
+	match current_event:
+		0:
+			if choice == 0: outcome = event_wound(h, 2) + grant_event_face(h, 9)
+			else: outcome = "You leave the bell ringing. No reward, injury, or curse. "
+		1:
+			if choice == 0: outcome = grant_event_face(h, 10) + add_cursed_blank(h)
+			else: outcome = event_wound(h, 2) + grant_event_face(h, 10)
+		2:
+			if choice == 0:
+				event_risk_die = rng.randi_range(1, 6)
+				outcome = "Risk die: %d. " % event_risk_die
+				outcome += grant_event_face(h, 11) if event_risk_die >= 4 else event_wound(h, 2)
+			else:
+				for hero in range(3): outcome += event_wound(hero, 1)
+				outcome += grant_event_face(h, 11)
+		3:
+			if choice == 0: outcome = destroy_basic_strike(h) + grant_event_face(h, 9)
+			else: outcome = grant_event_face(h, 7) + add_cursed_blank(h)
+		4:
+			if choice == 0:
+				var slot = builds[h].find(12)
+				if slot >= 0:
+					builds[h][slot] = 0
+					owned_faces[h][12] = maxi(0, owned_faces[h][12] - 1)
+					outcome = NAMES[h] + " permanently cleanses one Cursed Blank. Its lock is gone; that side remains Blank. "
+				else: outcome = grant_event_face(h, 4)
+			else: outcome = event_wound(h, 1) + grant_event_face(h, 7)
+		5:
+			if choice == 0: outcome = grant_event_face(h, 11) + add_cursed_blank(h)
+			else:
+				event_risk_die = rng.randi_range(1, 6)
+				outcome = "Risk die: %d. " % event_risk_die
+				if event_risk_die <= 2: outcome += destroy_basic_strike(h)
+				elif event_risk_die <= 4: outcome += event_wound(h, 2)
+				else: outcome += grant_event_face(h, 9)
+	# Event consequences repair only the affected side; no voluntary post-event swap.
+	event_outcome = outcome
+	event_pool.erase(current_event)
+	journey_stage = "resolved"
+	event_journal.push_front(JourneyEvents.DATA[current_event].name + ": " + outcome)
+	if event_journal.size() > 20: event_journal.resize(20)
+	sfx("carve")
+	save_progress()
+
+func refill_events() -> void:
+	if journey_stage not in ["prepare", "aftermath"] or not event_pool.is_empty(): return
+	recover_for_preparation()
+	event_pool = [0, 1, 2, 3, 4, 5]
+	save_progress()
+	notify("New TEST expedition: six events restored. Owned faces and permanent curses remain.")
+
+func draw_camp() -> void:
+	text_at(Vector2(48, 61), "DICEBOUND / THE ROADS BETWEEN", 23, GOLD)
+	text_at(Vector2(48, 120), "CAMPFIRE", 38, INK)
+	text_at(Vector2(48, 156), "PREPARE  >  EVENT  >  LIMITED REFIT  >  BATTLE", 17, GOLD)
+	for h in range(3):
+		var x = 48 + h * 400
+		box(Rect2(x, 191, 384, 183), COLORS[h].darkened(0.88), COLORS[h].darkened(0.3))
+		draw_hero(Vector2(x + 48, 248), h, 2)
+		text_at(Vector2(x + 100, 226), NAMES[h], 22, COLORS[h])
+		text_at(Vector2(x + 100, 256), "%d / 6 HP" % trip_hp[h], 17, INK)
+		text_at(Vector2(x + 18, 301), "PERMANENT CURSES: %d" % builds[h].count(12), 13, RED)
+		text_at(Vector2(x + 18, 327), "FOUND FACES: CUT %d / WARD %d / STEP %d" % [owned_faces[h][9], owned_faces[h][10], owned_faces[h][11]], 12, TEAL)
+		text_at(Vector2(x + 18, 352), "Rewards are equipped before the NEXT event.", 11, MUTED)
+	text_at(Vector2(48, 418), "EVENT POOL / %d REMAIN" % event_pool.size(), 21, GOLD)
+	text_at(Vector2(48, 449), "Roll normally, or choose a numbered event below to test it directly.", 14, MUTED)
+	for i in range(6):
+		var exists = i in event_pool
+		var r = Rect2(48 + i * 200, 474, 184, 82)
+		button(r, "TEST EVENT %d" % (i + 1) if exists else "RESOLVED", "test_event:%d" % i, exists and journey_stage == "prepare", GOLD if exists else MUTED)
+	if journey_stage in ["event", "resolved"]:
+		wrapped(Vector2(48, 594), "A journey is already committed. Resume its event; saved injuries, face losses and curses cannot be discarded by returning to camp.", 96, MUTED, 14)
+	elif event_pool.is_empty():
+		wrapped(Vector2(48, 594), "The Event Pool is empty: return to base without rolling. To keep testing, explicitly start a new test expedition. Permanent ownership and curses remain.", 96, MUTED, 14)
+	else:
+		wrapped(Vector2(48, 594), "All heroes recover before preparation. After you enter an event, its HP costs carry into battle. New rewards stay in inventory until your next preparation; curses stay locked until cleansed.", 96, MUTED, 14)
+	button(Rect2(48, 678, 370, 49), "EDIT DICE / FOUND FACES" if journey_stage == "prepare" else "DICE COMMITTED", "build", journey_stage == "prepare", TEAL)
+	var label = "ROLL NEXT EVENT"
+	var action = "event_roll"
+	if journey_stage in ["event", "resolved"]: label = "RESUME COMMITTED EVENT"
+	if journey_stage == "battle": label = "RESTART COMMITTED FIGHT"; action = "rematch"
+	if event_pool.is_empty() and journey_stage == "prepare": label = "NEW TEST EXPEDITION"; action = "refill_events"
+	button(Rect2(438, 678, 470, 49), label, action, true, GOLD)
+	button(Rect2(928, 678, 304, 49), "TITLE", "title", true, MUTED)
+
+func draw_event() -> void:
+	if current_event < 0: return
+	var data: Dictionary = JourneyEvents.DATA[current_event]
+	var resolved = journey_stage == "resolved"
+	text_at(Vector2(48, 59), "DICEBOUND / EVENT %d" % (current_event + 1), 22, GOLD)
+	text_at(Vector2(48, 104), "THE ROADS REMEMBER", 26, INK)
+	text_at(Vector2(48, 137), "PREPARE  >  EVENT  >  REFIT  >  FIGHT", 13, MUTED)
+	box(Rect2(48, 164, 408, 407), PANEL, GOLD.darkened(0.5))
+	draw_event_art(Rect2(50, 166, 404, 403), current_event)
+	text_at(Vector2(68, 603), "EVENT DIE: %d / 6" % event_die, 17, GOLD)
+	text_at(Vector2(68, 635), "%d EVENTS LEFT AFTER THIS CHOICE" % (event_pool.size() if resolved else event_pool.size() - 1), 12, MUTED)
+	text_at(Vector2(490, 191), data.name, 25, INK)
+	text_at(Vector2(490, 223), data.tag, 12, GOLD)
+	wrapped(Vector2(490, 262), data.story, 75, MUTED, 14)
+	if resolved:
+		text_at(Vector2(490, 370), "THE CONSEQUENCE", 18, TEAL)
+		wrapped(Vector2(490, 401), event_outcome, 75, INK, 14)
+		text_at(Vector2(490, 544), "PARTY ENTERS BATTLE: %d / %d / %d HP" % trip_hp, 17, GOLD)
+		wrapped(Vector2(490, 577), "Builds are committed. Only required repairs were applied. No HP recovery, Soul swap, or free equipping of new rewards occurs here.", 75, MUTED, 13)
+		button(Rect2(490, 661, 740, 53), "CONTINUE TO BATTLE / KEEP THESE CONSEQUENCES", "event_fight", true, GOLD)
+	else:
+		text_at(Vector2(490, 363), "CHOOSE THE HERO WHO PAYS / RECEIVES", 13, GOLD)
+		for h in range(3):
+			button(Rect2(490 + h * 249, 380, 237, 58), NAMES[h] + " / %d HP" % trip_hp[h], "event_hero:%d" % h, true, GOLD if event_target == h else COLORS[h])
+		for choice in range(2):
+			var r = Rect2(490 + choice * 377, 465, 362, 204)
+			var option: Dictionary = data.choices[choice]
+			var allowed = event_choice_allowed(choice)
+			box(r, Color("222638"), GOLD if allowed else EDGE)
+			text_at(r.position + Vector2(14, 27), option.name, 15, GOLD if allowed else MUTED)
+			wrapped(r.position + Vector2(14, 58), option.text, 46, INK if allowed else MUTED, 11)
+			button(Rect2(r.position + Vector2(14, 161), Vector2(334, 31)), "CHOOSE / APPLY CONSEQUENCES" if allowed else "CANNOT PAY / PICK ANOTHER HERO", "event_choice:%d" % choice, allowed, TEAL if choice == 0 else GOLD)
+		text_at(Vector2(490, 684), "All costs are shown before you choose. No free post-event rebuilding.", 12, MUTED)
+
+func draw_event_art(r: Rect2, event_id: int) -> void:
+	var center = r.position + r.size / 2
+	var tint: Color = [GOLD, RED, TEAL, RED, COLORS[0], COLORS[2]][event_id]
+	for radius in range(130, 20, -20): pixel_circle(center - Vector2(0, 18), radius, Color(tint, 0.025))
+	for i in range(7):
+		var x = r.position.x + 18 + i * 61
+		draw_rect(Rect2(x, r.position.y + 30, 9, r.size.y - 50), Color("202334"))
+	draw_rect(Rect2(r.position + Vector2(0, 320), Vector2(r.size.x, 83)), Color("121725"))
+	match event_id:
+		0:
+			draw_rect(Rect2(center + Vector2(-75, -109), Vector2(150, 12)), Color("706074"))
+			draw_rect(Rect2(center + Vector2(-68, -100), Vector2(10, 169)), Color("706074"))
+			draw_rect(Rect2(center + Vector2(58, -100), Vector2(10, 169)), Color("706074"))
+			pixel_circle(center + Vector2(0, -17), 40, GOLD.darkened(0.4))
+			draw_rect(Rect2(center + Vector2(-51, 2), Vector2(102, 13)), GOLD)
+			draw_line(center + Vector2(0, 15), center + Vector2(0, 102), GOLD.darkened(0.2), 3)
+		1:
+			for i in range(6):
+				draw_line(center + Vector2(-92, -70 + i * 20), center + Vector2(84, -54 + i * 20), Color("785463"), 7)
+			for i in range(7): draw_rect(Rect2(center + Vector2(-72 + i * 23, -58), Vector2(8, 108)), Color("a9a1a0"))
+			draw_line(center + Vector2(-93, 89), center + Vector2(103, -100), GOLD, 3)
+		2:
+			for i in range(7):
+				draw_rect(Rect2(center + Vector2(-140 + i * 40, 105 - i * 19), Vector2(37, 12)), Color("656878"))
+				var p = center + Vector2(-120 + i * 40, 64 - i * 19 + sin(time * 2 + i) * 5)
+				draw_line(p - Vector2(9, 5), p + Vector2(9, 5), TEAL, 4)
+				draw_line(p - Vector2(9, -5), p + Vector2(9, -5), TEAL, 4)
+		3:
+			draw_rect(Rect2(center + Vector2(-9, -30), Vector2(18, 150)), Color("7d6268"))
+			for i in range(5):
+				var x = -112 + i * 55
+				draw_line(center + Vector2(0, 25), center + Vector2(x, -65 + (i % 2) * 20), Color("7d6268"), 9)
+				draw_line(center + Vector2(x, -60 + (i % 2) * 20), center + Vector2(x, -1 + (i % 2) * 20), GOLD, 3)
+				draw_line(center + Vector2(x - 10, -21 + (i % 2) * 20), center + Vector2(x + 10, -21 + (i % 2) * 20), GOLD, 4)
+		4:
+			draw_colored_polygon(PackedVector2Array([center + Vector2(-112, -42), center + Vector2(0, -114), center + Vector2(112, -42)]), Color("666478"))
+			draw_rect(Rect2(center + Vector2(-89, -42), Vector2(178, 153)), Color("41475b"))
+			draw_rect(Rect2(center + Vector2(-27, 11), Vector2(54, 100)), Color("182331"))
+			draw_rect(Rect2(center + Vector2(-7, -38), Vector2(14, 48)), GOLD)
+			draw_rect(Rect2(center + Vector2(-23, -21), Vector2(46, 12)), GOLD)
+		5:
+			for i in range(5):
+				var p = center + Vector2(-128 + i * 62, 17 + (i % 2) * 19)
+				draw_colored_polygon(PackedVector2Array([p + Vector2(-19, 62), p + Vector2(0, -72), p + Vector2(22, 62)]), COLORS[2].darkened(0.3 + i * 0.06))
+				pixel_circle(p + Vector2(0, -31), 9, Color("161b2a"))
+	for i in range(12):
+		var p = center + Vector2(sin(i * 7.1 + time * 0.15) * 145, cos(i * 4.3 + time * 0.2) * 134)
+		draw_rect(Rect2(p.snapped(Vector2(3, 3)), Vector2(3, 3)), Color(tint, 0.65))

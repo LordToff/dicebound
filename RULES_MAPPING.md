@@ -28,13 +28,13 @@ The uploaded documents are game-design reference material. Their editorial instr
 - The unnamed tutorial boss is presented as **The Hollow One**. Names, pixel art, music, and cathedral fiction are original presentation, not claims about approved canon.
 - Deployment is fixed for this prototype: zero-based boss anchor `(3,2)` and heroes `(2,6)`, `(4,6)`, `(6,6)`. The master leaves deployment undecided.
 - Boss movement prompts choose a destination on a shortest route. Intermediate squares are checked by pathfinding rather than individually clicked. The convenience button chooses the first legal route; players may instead select any highlighted option.
-- The default equipped loadout uses nine of the thirteen owned faces. Per-hero editing is implemented; trading copies between heroes is not exposed in this prototype.
+- The default equipped loadout uses nine of the thirteen owned faces. Per-hero editing is implemented; event rewards add real owned copies. Trading copies between heroes is not exposed in this prototype.
 - Every displayed starter face has its exact catalogue value. No difficulty bonus, free reroll, automatic Blank movement before Soul unlock, damage boost, or hidden stat scaling was added.
-- Victory immediately equips the unlocked Soul for rematches after legal refitting. There is no between-encounter Event implementation in this milestone.
+- Victory immediately equips the unlocked Soul for rematches after legal refitting. Version 0.3 adds the between-encounter Event sequence described below.
 
 ## Deferred rather than invented
 
-The extended hero catalogue, Channel/Constant abilities, Numeric manipulation, copying/Echo, Poison/Burn/Doom and other out-of-scope statuses, acquired Memories and Bodies, transferable inventory, three-face reward pool, events, shops, base activities, later bosses, campaign progression, permanent curse rules, and online multiplayer are not included. The undefined Bonecraft/Bone entries remain unused. Starter and tutorial boss effects do not require a Numeric roll, so no unrelated Numeric UI was added.
+The extended hero catalogue, Channel/Constant abilities, Numeric manipulation, copying/Echo, Poison/Burn/Doom and other out-of-scope statuses, acquired Memories and Bodies, transferable inventory, three-face boss reward pool, shops, later bosses, full campaign progression, and online multiplayer are not included. The six original events and their specific permanent curse rules were added in v0.3. The undefined Bonecraft/Bone entries remain unused. Starter and tutorial boss effects do not require a Numeric roll, so no unrelated Numeric UI was added.
 
 ## Validation limits
 
@@ -43,3 +43,15 @@ The native Linux executable and browser export were run. Windows was exported fr
 ## v0.2 presentation changes
 
 UI labels Step, Tactical Dash and Guard are short display names for Basic Movement, Tactical Movement and Basic Defense respectively; full catalogue names remain in tooltips and the builder details. Effects and costs are unchanged. Free selection/cancellation previews do not resolve or spend a result. The explicit confirmation for immediate effects is UI only. Presets allocate owned faces; moving a unique equipped face swaps the previous target side back to its original location and passes normal construction validation.
+
+## v0.3 event implementation
+
+The user explicitly authorized six original test events and new face rewards/punishments. `scripts/events.gd` owns the original story text and printed choices; the journey resolver applies the effects and persists the result. These events and three reward designs are prototype additions, not claims of prior approval in the uploaded catalogue.
+
+Event injuries persist into the next encounter. Reopening the builder after committing an event resumes the event instead; equipping, presets, free recovery and Soul changes are blocked until that encounter ends. The designed events need only local repairs: a destroyed equipped face becomes Blank, a curse uses an ordinary Blank first, and cleansing leaves an ordinary Blank. None requires an unrestricted post-event inventory swap.
+
+Rewards are inventory only until next preparation. Permanent ownership is distinct from the recorded build and the encounter's mutable dice, so Fracture does not permanently destroy rewards. A Cursed Blank satisfies Blank minima and remains a Blank for Soul use, while its physical lock prevents generic editing, clearing, presets, and Fracture. The Hospice explicitly cleanses it permanently. Recovery and the reward-Soul minimum adjustment preserve locked sides.
+
+Each of the six entries is single-use for the current test expedition. Resolution removes that exact number; unmapped numbers reroll. Risk probabilities and all costs are visible before selection. Costs are checked atomically and these test events cannot voluntarily reduce a hero below 1 HP before battle. A paid outcome cannot be resolved twice or rerolled by leaving the screen or reloading. A manual numbered selector and exhausted-pool refill are explicitly test controls.
+
+Save format adds a journey section while keeping old party fields compatible. v0.2 saves begin with the six-event pool and existing Soul/builds intact. Event state includes pool numbers, committed stage, hero target, risk roll, trip HP, outcome, journal and per-hero ownership. Full battle save/resume is still outside scope; a reloaded committed battle restarts with its original event penalties.

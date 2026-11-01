@@ -1,5 +1,6 @@
 """Exercise the embedded HTML in a secure browser context; block every external asset request."""
-import asyncio,json
+import asyncio,json,io
+from PIL import Image
 from pathlib import Path
 from playwright.async_api import async_playwright
 async def main():
@@ -17,6 +18,19 @@ async def main():
   await page.goto('https://dicebound.test/play',wait_until='load',timeout=60000)
   await page.wait_for_function("document.getElementById('status') === null",timeout=60000)
   await page.wait_for_timeout(1000)
+  await page.mouse.click(952,42)
+  await page.wait_for_timeout(1500)
+  await page.reload(wait_until='load')
+  await page.wait_for_function("document.getElementById('status') === null",timeout=60000)
+  await page.wait_for_timeout(500)
+  settings_image=Image.open(io.BytesIO(await page.screenshot())).convert('RGB')
+  toggle_color=settings_image.getpixel((827,42))
+  assert toggle_color[1] > toggle_color[0]*1.4, ('Blank-step preference did not survive reload',toggle_color)
+  await page.mouse.click(778,42)
+  await page.wait_for_function("document.fullscreenElement !== null",timeout=5000)
+  await page.evaluate("document.exitFullscreen()")
+  await page.wait_for_function("document.fullscreenElement === null",timeout=5000)
+  await page.wait_for_timeout(300)
   await page.screenshot(path='/workspace/dicebound-standalone-title.png')
   await page.mouse.click(243,480)
   await page.wait_for_timeout(300)
@@ -34,6 +48,6 @@ async def main():
   await page.screenshot(path='/workspace/dicebound-standalone-help.png')
   assert not errors,errors
   assert not external,external
-  print(json.dumps({'page_errors':errors,'external_requests':external,'result':'PASS: embedded game opens, builder, event choice, consequence screen and battle playable; guide works; zero external asset requests','console':logs[-10:]},indent=2))
+  print(json.dumps({'page_errors':errors,'external_requests':external,'result':'PASS: embedded game opens, saved Blank-step preference, fullscreen, builder, event choice and battle verified; zero external asset requests','console':logs[-10:]},indent=2))
   await browser.close()
 asyncio.run(main())

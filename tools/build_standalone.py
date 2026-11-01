@@ -47,8 +47,12 @@ for name in ['index.png','index.icon.png','index.apple-touch-icon.png']:
  html=html.replace('"'+name+'"','"'+data+'"')
 html=html.replace('<title>DICEBOUND · The Hollow Tribunal</title>','<title>Play DICEBOUND</title>')
 html=html.replace('<head>', '<head>\n<meta name="description" content="DICEBOUND: an offline-playable tactical pixel-art dice battler.">')
-# Show an intentional title while the embedded engine compiles.
-html=html.replace('<div id="status">','<div id="status"><div style="position:absolute;left:0;right:0;top:18%;text-align:center;font:24px monospace;color:#e7b86a;z-index:2">DICEBOUND<br><small style="font-size:14px;color:#9398ab">Preparing your dice…</small></div>')
+# A self-contained branded loading screen, with the real engine progress bar.
+html=re.sub(r'^[\t ]*<img id="status-splash"[^>]*>[\t ]*\n?', '', html, flags=re.MULTILINE)
+icon='data:image/png;base64,'+base64.b64encode((web/'index.icon.png').read_bytes()).decode()
+loading='<div id="loading-shell"><img src="'+icon+'" width="72" height="72" alt=""><h1>DICEBOUND</h1><p>THE HOLLOW TRIBUNAL</p><small>Preparing your journey…</small></div>'
+html=html.replace('<div id="status">','<div id="status">'+loading)
+html=html.replace('</head>', '<style>#status{position:fixed;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;background:radial-gradient(ellipse at center,#242334 0%,#101321 70%)}#loading-shell{text-align:center;font-family:monospace;color:#e7b86a}#loading-shell img{image-rendering:pixelated;display:block;margin:0 auto 22px}#loading-shell h1{font-size:42px;letter-spacing:8px;margin:0 0 10px;color:#e6dfcb}#loading-shell p{font-size:12px;letter-spacing:4px;color:#e7b86a}#loading-shell small{display:block;margin-top:22px;font-size:13px;color:#9398ab}#status-progress{width:300px;height:7px;margin-top:26px;accent-color:#e7b86a}#status-notice{max-width:580px;font:14px monospace;color:#e66d78;padding:20px}</style></head>')
 html=html.replace('background-color: black;', 'background-color: #101321;')
 notices = '\n'.join((web/name).read_text() for name in ['GODOT_LICENSE.txt','GODOT_COPYRIGHT.txt','FONT_LICENSE.txt'])
 html += '\n<!-- Third-party notices\n'+notices.replace('--','—')+'\n-->\n'

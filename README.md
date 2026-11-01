@@ -87,3 +87,13 @@ New, explicitly original test reward faces: **Lantern Cut** (Attack: 2 damage to
 Rewards enter inventory; equip them in the builder's **Found Faces** tab during the NEXT preparation. Event wounds carry into the immediate fight. Cursed Blanks count toward Soul Blank minima but cannot be overwritten, cleared, preset away or removed by Fracture. Only explicit cleansing unlocks them. All six event choices remove the triggering entry from this test pool.
 
 A deliberately marked **New Test Expedition** button refills an exhausted pool for repeated testing; it keeps owned faces and permanent curses. This is a manual prototype test control, not an automatic full-pool reset or finalized campaign progression. The same tutorial boss is repeated between events.
+
+## v0.4 — larger arena and Blank-step test option
+
+The battlefield now uses 70-pixel cells instead of 54: a 630×630 arena, about 68% more visible area. Hero art is enlarged, abilities use a vertical list, selected movement squares show step counts, and the boss intentions, party status and chronicle fit beside the board. **FULL** at the top enters fullscreen; **EXIT** returns to the normal browser view.
+
+The persistent **TEST BLANK STEP: OFF / ON** switch is visible at the top of every screen, including during a fight. With it on, any hero can spend one rolled Action Blank to Move 1 orthogonal square once during that hero's turn, even before earning the reward Soul. Cursed Blanks count as Blanks for this effect but stay physically locked. Turning it on grants no Soul, face or extra die, and does not change construction minima. The test option and earned Soul share one allowance; cycling the switch cannot refresh it. Turning it off cancels an uncommitted test step for free, while an earned Soul's own movement remains available. The switch defaults off and saves locally across reloads.
+
+Shortcuts: **1/2/3** select a card; **Enter** confirms an immediate ability or a declared boss attack; **Space** resolves the next boss die; **Esc/right-click** cancel a free selection. The browser loading screen is now branded and retains the real engine progress indicator.
+
+`tests/test_blank_step.gd` verifies the toggle, per-hero turn limits, toggling exploit prevention, earned Soul interaction, Cursed Blanks, enlarged click coordinates and non-overlapping ability panels. The browser test checks actual preference persistence across reload and fullscreen entry/exit.

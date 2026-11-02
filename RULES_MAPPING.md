@@ -1,4 +1,6 @@
-# Rules mapping and implementation choices
+# Historical Godot prototype rules mapping
+
+**The current browser game is the v1.0 Ember Road rebuild. See [README.md](README.md) for its rules. The remainder of this file records the older Godot prototype and is not a specification for the browser release.**
 
 The uploaded documents are game-design reference material. Their editorial instructions, historical approval language, and undecided concepts were not treated as instructions to operate this workspace.
 

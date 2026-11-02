@@ -1,3 +1,48 @@
+# 1.0 — The Ember Road: a new browser game
+
+Rebuilt the browser release from scratch in plain JavaScript, HTML and Canvas. This replaces the Godot browser export. The old Godot project remains historical source; its old saves and native downloads are separate.
+
+## The event skip is removed
+- The old journey button could resume an already committed battle without showing its event. That resume path and save format are not used in this game.
+- New Adventure always begins with an event, never a fight. Every subsequent new encounter gets its own event.
+- Event choices show exact costs, the receiving hero and the face being replaced. Costs apply once and cannot be paid again on reload.
+- A result receipt explains what changed. Enter the Fight is a separate, explicit button.
+- Continue from a saved battle shows its previous event receipt before Resume Saved Fight. A retry also returns through that receipt.
+
+## Original pixel graphics
+- Removed all old illustrated scenes and image assets from the shipped browser game.
+- Heroes, bosses, NPCs, ability icons, scenery and terrain are drawn from original indexed pixel patterns and simple pixel geometry.
+- Crisp nearest-neighbor display, integer sprite scales, a restrained console-style palette, idle animation and distinct boss palettes.
+- Added sword arcs, ranged projectiles, floating numbers, shield feedback and impact shake. Reduced-motion preferences stop shake and idle motion.
+- A new original synthesized chiptune has melody, bass and harmony, with short action sounds. Music starts only when enabled.
+
+## Simpler, quicker combat
+- Control three heroes in any order. There is no initiative queue or manual boss resolution.
+- Each hero rolls two dice from one six-face pool. Each visible card is one action and costs only that die.
+- Free two-step movement per hero, split around actions. No movement-die requirement.
+- Attacks automatically hit the boss when in range. Guard applies immediately. Heal by choosing a party portrait or tile.
+- A free, party-wide Blank reforge once per round guarantees installed abilities for unused Blanks; spent dice are preserved.
+- Blanks can always throw a 1-damage Pebble at range 3. The saved Blank Step toggle also lets each hero trade a Blank for one step per round.
+- An all-Blank shared roll retains one installed non-Blank ability where possible.
+- Six-HP heroes, simple shield, healing that revives, party recovery after victory and a full-health retry option.
+- Face upgrades equip immediately and their replacement is shown. The complicated old manual editor, confirmation flow, Souls and permanent curse system are absent from this new ruleset.
+
+## A complete short adventure
+- Three encounters: Briar Guardian (22 HP), The Drowned Bell (28 HP), and The Cinder Crown (34 HP).
+- Different attack patterns: root sweeps, cross blasts and thorn rings; separated tidal rows; crossing crownfire diagonals and falling embers.
+- Bosses enrage at half health and deal stronger damage from the next announced plan. Warnings stay fixed through your decisions.
+- Red tiles show every damaging area. There is no hidden attack outside those tiles. Boss movement happens between warnings.
+- Six rewritten events with two transparent bargains each. Three distinct events are drawn per adventure.
+- Win a fight, recover, choose one of three upgrades for a hero, then visit the next event. Defeat the final boss to reach an ending with your event history.
+
+## Browser and validation
+- The entire game is a roughly 60 KB self-contained HTML file, replacing the roughly 20 MB engine bundle. No external fonts, images or audio requests.
+- Responsive layout, real HTML buttons, keyboard shortcuts, visible focus, full-screen controls, guide and automatic local saves.
+- Tested all 12 event choices, save/resume, real mouse movement, action payments, phase warning stability, revival, defeat/retry, music, preferences and mobile width.
+- Twenty seeded full-adventure simulations completed successfully. These are regression checks; human difficulty and enjoyment still need player feedback.
+
+---
+
 # 0.6 — Adventure overhaul
 
 This is a new, deliberately redesigned ruleset. The title-screen ruleset button retains the original Classic prototype for comparison. Existing inventories, curses, events and unlocked Souls are kept.

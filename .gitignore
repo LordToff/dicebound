@@ -5,3 +5,6 @@
 # Intermediate PCM used only when regenerating the original score.
 assets/tribunal.wav
 assets/tribunal.wav.import
+
+# Python browser test cache
+__pycache__/

@@ -8,9 +8,9 @@ async def main():
  async with async_playwright() as p:
   browser=await p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox','--enable-webgl','--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
   page=await browser.new_page(viewport={'width':1280,'height':800})
-  errors=[];external=[];logs=[]
+  errors=[];external=[];logs=[];console_errors=[]
   page.on('pageerror',lambda e: (errors.append(str(e)),print('JS ERROR',e,flush=True)))
-  page.on('console',lambda m: (logs.append(m.text),print(m.type,m.text,flush=True)))
+  page.on('console',lambda m: (logs.append(m.text),console_errors.append(m.text) if m.type=='error' else None,print(m.type,m.text,flush=True)))
   async def block(route):
    external.append(route.request.url);await route.abort()
   await page.route('http://**/*',block);await page.route('https://**/*',block)
@@ -38,15 +38,16 @@ async def main():
   await page.mouse.click(929,684)
   await page.wait_for_timeout(350)
   await page.screenshot(path='/workspace/dicebound-standalone-event.png')
-  await page.mouse.click(665,641)
-  await page.wait_for_timeout(350)
+  await page.mouse.click(320,728)
+  await page.wait_for_timeout(1100)
   await page.screenshot(path='/workspace/dicebound-standalone-outcome.png')
-  await page.mouse.click(862,687)
+  await page.mouse.click(862,734)
   await page.wait_for_timeout(1000)
   await page.screenshot(path='/workspace/dicebound-standalone-battle.png')
   await page.keyboard.press('Escape');await page.wait_for_timeout(200)
   await page.screenshot(path='/workspace/dicebound-standalone-help.png')
   assert not errors,errors
+  assert not console_errors,console_errors
   assert not external,external
   print(json.dumps({'page_errors':errors,'external_requests':external,'result':'PASS: embedded game opens, saved Blank-step preference, fullscreen, builder, event choice and battle verified; zero external asset requests','console':logs[-10:]},indent=2))
   await browser.close()

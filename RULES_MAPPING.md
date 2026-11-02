@@ -59,3 +59,7 @@ Save format adds a journey section while keeping old party fields compatible. v0
 ## v0.4 explicit optional test rule
 
 The user requested a switch for Blank-to-Move-1 before Soul acquisition. The default-off `blank_step_test` setting enables that optional prototype rule independently of Soul ownership. It spends a rolled Action Blank and uses the hero's existing `soul_used` per-turn allowance, so the option and the earned Soul cannot stack into two uses. It is neither a free step nor a new face. Numeric Blanks remain unaffected. Disabling the option preserves an earned Soul's printed effect. Switching off/on never resets the counter. Layout changes enlarge the visible board without changing the 9×9 battlefield or movement/range rules.
+
+## v0.5 event presentation
+
+The illustrated scenes, named NPC appearances, character story sprites and atmospheric effects are presentation additions. Event effects, probabilities, ownership and timing are unchanged. Structured feedback is calculated from HP and ownership differences after the event resolves. Animations read that metadata without applying effects or consuming RNG. Older saves with no visual metadata keep their original outcome and gameplay consequences.

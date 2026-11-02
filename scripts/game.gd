@@ -77,6 +77,9 @@ var event_target = 0
 var event_die = 0
 var event_risk_die = 0
 var event_outcome = ""
+var event_feedback: Array = []
+var event_scene_elapsed = 0.0
+var event_reveal_elapsed = 2.0
 var event_journal: Array = []
 var pool_page = 0
 var hurt_timers = {}
@@ -87,6 +90,7 @@ const BOSS_TIPS = {"Advance":"Move up to 2 toward the closest hero.", "Skirmish"
 func _ready() -> void:
 	font = load("res://assets/pixel-mono.ttf")
 	font.antialiasing = 0
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	rng.randomize()
 	for h in range(3):
 		builds.append([1, 2, 4, 0, 0, 0, 1, 3, 5, 0, 0, 0, 1, 7, 6, 0, 0, 0])
@@ -135,13 +139,13 @@ func sfx(kind: String) -> void:
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
 	wav.mix_rate = 22050
 	var data = PackedByteArray()
-	var n = 4200 if kind == "hit" else 2300
+	var n = 12000 if kind.begins_with("event_") else (4200 if kind == "hit" else 2300)
 	data.resize(n * 2)
 	for i in range(n):
 		var t = float(i) / 22050.0
-		var frequencies = {"hit": 110.0, "heal": 660.0, "block": 270.0, "step": 150.0, "roll": 420.0, "carve": 880.0}
+		var frequencies = {"hit": 110.0, "heal": 660.0, "block": 270.0, "step": 150.0, "roll": 420.0, "carve": 880.0, "event_good": 440.0, "event_bad": 90.0, "event_reveal": 220.0}
 		var base: float = frequencies.get(kind, 330.0)
-		var f = base * (1.0 - t * 3.0) if kind in ["hit", "step"] else base * (1.0 + t * 2.0)
+		var f = base * (1.0 - t * 3.0) if kind in ["hit", "step", "event_bad"] else base * (1.0 + t * 2.0)
 		var wave_value = sin(TAU * f * t) + 0.35 * sin(TAU * f * 1.5 * t)
 		if kind == "hit": wave_value += sin(i * 713.7) * 0.7
 		var v = wave_value * pow(1.0 - float(i) / n, 2) * 0.20
@@ -152,6 +156,9 @@ func sfx(kind: String) -> void:
 
 func _process(delta: float) -> void:
 	time += delta
+	if screen == "event":
+		event_scene_elapsed += delta
+		if journey_stage == "resolved": event_reveal_elapsed = minf(3.0, event_reveal_elapsed + delta)
 	for h in hurt_timers.keys(): hurt_timers[h] = maxf(0.0, hurt_timers[h] - delta)
 	toast_time = maxf(0, toast_time - delta)
 	shake = maxf(0, shake - delta * 32)
@@ -1024,7 +1031,7 @@ func draw_battle() -> void:
 		elif f == 7: visual_mode = "heal"
 		elif f == 8: visual_mode = "shove"
 	text_at(Vector2(40, 44), "DICEBOUND", 24, GOLD)
-	text_at(Vector2(248, 43), "THE HOLLOW TRIBUNAL / v0.4", 13, MUTED)
+	text_at(Vector2(248, 43), "THE HOLLOW TRIBUNAL / v0.5", 13, MUTED)
 	text_at(Vector2(556, 43), "ROUND %02d" % round_no, 14, GOLD)
 	for i in range(4):
 		var h: int = order[i]
@@ -1529,6 +1536,7 @@ func write_journey(config: ConfigFile) -> void:
 	config.set_value("journey", "risk", event_risk_die)
 	config.set_value("journey", "outcome", event_outcome)
 	config.set_value("journey", "journal", event_journal.duplicate())
+	config.set_value("journey", "feedback", event_feedback.duplicate(true))
 
 func load_journey(config: ConfigFile) -> void:
 	var stored = config.get_value("journey", "owned", [])
@@ -1549,6 +1557,17 @@ func load_journey(config: ConfigFile) -> void:
 	event_die = clampi(int(config.get_value("journey", "die", 0)), 0, 6)
 	event_risk_die = clampi(int(config.get_value("journey", "risk", 0)), 0, 6)
 	event_outcome = str(config.get_value("journey", "outcome", "")).left(2000)
+	event_feedback = []
+	var changes = config.get_value("journey", "feedback", [])
+	if changes is Array:
+		for change in changes.slice(0, 8):
+			if not change is Dictionary: continue
+			if change.get("kind", "") not in ["hp", "face", "face_loss", "curse", "cleanse", "safe"]: continue
+			if not change.get("hero", -1) is int or change.hero < 0 or change.hero > 2: continue
+			if not change.get("value", null) is int: continue
+			if change.kind in ["face", "face_loss"] and (not change.get("face", null) is int or change.face < 1 or change.face > 11): continue
+			event_feedback.append(change.duplicate(true))
+	event_reveal_elapsed = 2.0
 	var journal = config.get_value("journey", "journal", [])
 	if journal is Array:
 		event_journal = []
@@ -1563,6 +1582,8 @@ func recover_for_preparation() -> void:
 	event_die = 0
 	event_risk_die = 0
 	event_outcome = ""
+	event_feedback = []
+	event_scene_elapsed = 0.0
 	if reward:
 		blank_min = 3
 		for h in range(3):
@@ -1647,8 +1668,11 @@ func reveal_event(chosen_id: int = -1) -> void:
 	journey_stage = "event"
 	event_outcome = ""
 	event_risk_die = 0
+	event_feedback = []
+	event_scene_elapsed = 0.0
+	event_reveal_elapsed = 2.0
 	screen = "event"
-	sfx("roll")
+	sfx("event_reveal")
 	save_progress()
 
 func event_choice_allowed(choice: int) -> bool:
@@ -1693,10 +1717,13 @@ func destroy_basic_strike(h: int) -> String:
 	return NAMES[h] + " permanently loses one owned Basic Strike. A necessary equipped copy becomes Blank. "
 
 func resolve_event(choice: int) -> void:
+	if journey_stage != "event": return
 	if not event_choice_allowed(choice):
 		notify("Cannot pay this choice's printed cost. Choose another hero or option.")
 		return
 	var h = event_target
+	var previous_hp: Array = trip_hp.duplicate()
+	var previous_owned: Array = owned_faces.duplicate(true)
 	var outcome = ""
 	match current_event:
 		0:
@@ -1735,11 +1762,11 @@ func resolve_event(choice: int) -> void:
 				else: outcome += grant_event_face(h, 9)
 	# Event consequences repair only the affected side; no voluntary post-event swap.
 	event_outcome = outcome
+	record_event_feedback(previous_hp, previous_owned)
 	event_pool.erase(current_event)
 	journey_stage = "resolved"
 	event_journal.push_front(JourneyEvents.DATA[current_event].name + ": " + outcome)
 	if event_journal.size() > 20: event_journal.resize(20)
-	sfx("carve")
 	save_progress()
 
 func refill_events() -> void:
@@ -1787,84 +1814,78 @@ func draw_event() -> void:
 	if current_event < 0: return
 	var data: Dictionary = JourneyEvents.DATA[current_event]
 	var resolved = journey_stage == "resolved"
-	text_at(Vector2(48, 59), "DICEBOUND / EVENT %d" % (current_event + 1), 22, GOLD)
-	text_at(Vector2(48, 104), "THE ROADS REMEMBER", 26, INK)
-	text_at(Vector2(48, 137), "PREPARE  >  EVENT  >  REFIT  >  FIGHT", 13, MUTED)
-	box(Rect2(48, 164, 408, 407), PANEL, GOLD.darkened(0.5))
-	draw_event_art(Rect2(50, 166, 404, 403), current_event)
-	text_at(Vector2(68, 603), "EVENT DIE: %d / 6" % event_die, 17, GOLD)
-	text_at(Vector2(68, 635), "%d EVENTS LEFT AFTER THIS CHOICE" % (event_pool.size() if resolved else event_pool.size() - 1), 12, MUTED)
-	text_at(Vector2(490, 191), data.name, 25, INK)
-	text_at(Vector2(490, 223), data.tag, 12, GOLD)
-	wrapped(Vector2(490, 262), data.story, 75, MUTED, 14)
+	text_at(Vector2(40, 49), "DICEBOUND / EVENT %d" % (current_event + 1), 20, GOLD)
+	text_at(Vector2(40, 98), data.name, 30, INK)
+	text_at(Vector2(40, 125), data.tag, 12, GOLD)
+	var scene = Rect2(40, 144, 640, 411)
+	box(scene.grow(2), PANEL, GOLD.darkened(0.4))
+	draw_event_art(scene, current_event)
+	text_at(Vector2(53, 499), "CHOSEN HERO / PAYS AND RECEIVES" if not resolved else "CONSEQUENCES APPLIED / PARTY STATUS", 9, GOLD)
+	for h in range(3):
+		var r = Rect2(50 + h * 208, 506, 198, 42)
+		box(r, COLORS[h].darkened(0.85), GOLD if event_target == h else COLORS[h].darkened(0.4))
+		EventPresentation.portrait(self, Rect2(r.position + Vector2(5, 4), Vector2(33, 33)), h)
+		text_at(r.position + Vector2(42, 17), NAMES[h], 13, COLORS[h])
+		text_at(r.position + Vector2(42, 34), "%d / 6 HP" % trip_hp[h], 11, RED if trip_hp[h] < 6 else INK)
+		var curses: int = builds[h].count(12)
+		if curses > 0: text_at(r.position + Vector2(137, 17), "CURSE x%d" % curses, 9, COLORS[2])
+		if not resolved: hits.append({"r": r, "id": "event_hero:%d" % h})
+	box(Rect2(700, 144, 540, 411), Color("171c2d"), EDGE)
+	text_at(Vector2(716, 171), "THE ROADS BETWEEN", 12, GOLD)
+	wrapped(Vector2(716, 205), data.story, 60, INK, 14)
 	if resolved:
-		text_at(Vector2(490, 370), "THE CONSEQUENCE", 18, TEAL)
-		wrapped(Vector2(490, 401), event_outcome, 75, INK, 14)
-		text_at(Vector2(490, 544), "PARTY ENTERS BATTLE: %d / %d / %d HP" % trip_hp, 17, GOLD)
-		wrapped(Vector2(490, 577), "Builds are committed. Only required repairs were applied. No HP recovery, Soul swap, or free equipping of new rewards occurs here.", 75, MUTED, 13)
-		button(Rect2(490, 661, 740, 53), "CONTINUE TO BATTLE / KEEP THESE CONSEQUENCES", "event_fight", true, GOLD)
+		text_at(Vector2(716, 322), "THE CONSEQUENCE", 18, GOLD)
+		var shown: Array = event_feedback
+		if shown.is_empty(): shown = [{"kind":"record", "hero":event_target, "value":0}]
+		for i in range(mini(4, shown.size())):
+			if event_reveal_elapsed < i * 0.13: continue
+			EventPresentation.feedback_chip(self, Rect2(716 + (i % 2) * 261, 337 + (i / 2) * 77, 247, 65), shown[i])
+		text_at(Vector2(716, 518), "%d EVENTS REMAIN / OUTCOME SAVED" % event_pool.size(), 13, MUTED)
+		box(Rect2(40, 575, 1200, 119), PANEL, EDGE)
+		text_at(Vector2(57, 598), "THE CHOICE IS MADE", 12, GOLD)
+		wrapped(Vector2(57, 624), event_outcome, 140, INK, 13)
+		button(Rect2(40, 713, 1200, 42), "CONTINUE TO BATTLE / INJURIES AND CURSES RETAINED", "event_fight", event_reveal_elapsed >= 0.65, GOLD)
 	else:
-		text_at(Vector2(490, 363), "CHOOSE THE HERO WHO PAYS / RECEIVES", 13, GOLD)
-		for h in range(3):
-			button(Rect2(490 + h * 249, 380, 237, 58), NAMES[h] + " / %d HP" % trip_hp[h], "event_hero:%d" % h, true, GOLD if event_target == h else COLORS[h])
+		text_at(Vector2(716, 350), "A BARGAIN AWAITS", 20, GOLD)
+		wrapped(Vector2(716, 382), "Choose your hero in the scene. Then choose a bargain below. Wounds are immediate. New faces enter inventory; equip them during your next preparation.", 62, MUTED, 13)
+		text_at(Vector2(716, 506), "EVENT DIE %d / %d REMAIN AFTER THIS CHOICE" % [event_die, event_pool.size() - 1], 12, MUTED)
 		for choice in range(2):
-			var r = Rect2(490 + choice * 377, 465, 362, 204)
+			var r = Rect2(40 + choice * 610, 575, 590, 180)
 			var option: Dictionary = data.choices[choice]
 			var allowed = event_choice_allowed(choice)
-			box(r, Color("222638"), GOLD if allowed else EDGE)
-			text_at(r.position + Vector2(14, 27), option.name, 15, GOLD if allowed else MUTED)
-			wrapped(r.position + Vector2(14, 58), option.text, 46, INK if allowed else MUTED, 11)
-			button(Rect2(r.position + Vector2(14, 161), Vector2(334, 31)), "CHOOSE / APPLY CONSEQUENCES" if allowed else "CANNOT PAY / PICK ANOTHER HERO", "event_choice:%d" % choice, allowed, TEAL if choice == 0 else GOLD)
-		text_at(Vector2(490, 684), "All costs are shown before you choose. No free post-event rebuilding.", 12, MUTED)
+			var over = r.has_point(get_local_mouse_position())
+			box(r, Color("2a2c3e") if over and allowed else Color("202638"), GOLD if allowed else EDGE)
+			text_at(r.position + Vector2(15, 25), option.name, 17, GOLD if allowed else MUTED)
+			var badges: Array = EventPresentation.tags(current_event, choice)
+			var cost_color = GOLD
+			var cost_icon = "ward"
+			if "CURSE" in badges[0]: cost_color = COLORS[2]; cost_icon = "curse"
+			elif "HP" in badges[0]: cost_color = RED; cost_icon = "hp"
+			elif "DESTROY" in badges[0]: cost_color = RED; cost_icon = "blade"
+			elif "SAFE" in badges[0] or "CLEANSE" in badges[0]: cost_color = TEAL; cost_icon = "cleanse"
+			EventPresentation.symbol(self, r.position + Vector2(555, 24), cost_icon, cost_color, 0.72)
+			text_at(r.position + Vector2(15, 48), badges[0], 11, cost_color)
+			text_at(r.position + Vector2(255, 48), badges[1], 11, TEAL)
+			wrapped(r.position + Vector2(15, 73), option.text, 79, INK if allowed else MUTED, 11)
+			button(Rect2(r.position + Vector2(15, 139), Vector2(560, 29)), "CHOOSE THIS BARGAIN" if allowed else "CANNOT PAY / CHOOSE ANOTHER HERO", "event_choice:%d" % choice, allowed, TEAL if choice == 0 else GOLD)
 
 func draw_event_art(r: Rect2, event_id: int) -> void:
-	var center = r.position + r.size / 2
-	var tint: Color = [GOLD, RED, TEAL, RED, COLORS[0], COLORS[2]][event_id]
-	for radius in range(130, 20, -20): pixel_circle(center - Vector2(0, 18), radius, Color(tint, 0.025))
-	for i in range(7):
-		var x = r.position.x + 18 + i * 61
-		draw_rect(Rect2(x, r.position.y + 30, 9, r.size.y - 50), Color("202334"))
-	draw_rect(Rect2(r.position + Vector2(0, 320), Vector2(r.size.x, 83)), Color("121725"))
-	match event_id:
-		0:
-			draw_rect(Rect2(center + Vector2(-75, -109), Vector2(150, 12)), Color("706074"))
-			draw_rect(Rect2(center + Vector2(-68, -100), Vector2(10, 169)), Color("706074"))
-			draw_rect(Rect2(center + Vector2(58, -100), Vector2(10, 169)), Color("706074"))
-			pixel_circle(center + Vector2(0, -17), 40, GOLD.darkened(0.4))
-			draw_rect(Rect2(center + Vector2(-51, 2), Vector2(102, 13)), GOLD)
-			draw_line(center + Vector2(0, 15), center + Vector2(0, 102), GOLD.darkened(0.2), 3)
-		1:
-			for i in range(6):
-				draw_line(center + Vector2(-92, -70 + i * 20), center + Vector2(84, -54 + i * 20), Color("785463"), 7)
-			for i in range(7): draw_rect(Rect2(center + Vector2(-72 + i * 23, -58), Vector2(8, 108)), Color("a9a1a0"))
-			draw_line(center + Vector2(-93, 89), center + Vector2(103, -100), GOLD, 3)
-		2:
-			for i in range(7):
-				draw_rect(Rect2(center + Vector2(-140 + i * 40, 105 - i * 19), Vector2(37, 12)), Color("656878"))
-				var p = center + Vector2(-120 + i * 40, 64 - i * 19 + sin(time * 2 + i) * 5)
-				draw_line(p - Vector2(9, 5), p + Vector2(9, 5), TEAL, 4)
-				draw_line(p - Vector2(9, -5), p + Vector2(9, -5), TEAL, 4)
-		3:
-			draw_rect(Rect2(center + Vector2(-9, -30), Vector2(18, 150)), Color("7d6268"))
-			for i in range(5):
-				var x = -112 + i * 55
-				draw_line(center + Vector2(0, 25), center + Vector2(x, -65 + (i % 2) * 20), Color("7d6268"), 9)
-				draw_line(center + Vector2(x, -60 + (i % 2) * 20), center + Vector2(x, -1 + (i % 2) * 20), GOLD, 3)
-				draw_line(center + Vector2(x - 10, -21 + (i % 2) * 20), center + Vector2(x + 10, -21 + (i % 2) * 20), GOLD, 4)
-		4:
-			draw_colored_polygon(PackedVector2Array([center + Vector2(-112, -42), center + Vector2(0, -114), center + Vector2(112, -42)]), Color("666478"))
-			draw_rect(Rect2(center + Vector2(-89, -42), Vector2(178, 153)), Color("41475b"))
-			draw_rect(Rect2(center + Vector2(-27, 11), Vector2(54, 100)), Color("182331"))
-			draw_rect(Rect2(center + Vector2(-7, -38), Vector2(14, 48)), GOLD)
-			draw_rect(Rect2(center + Vector2(-23, -21), Vector2(46, 12)), GOLD)
-		5:
-			for i in range(5):
-				var p = center + Vector2(-128 + i * 62, 17 + (i % 2) * 19)
-				draw_colored_polygon(PackedVector2Array([p + Vector2(-19, 62), p + Vector2(0, -72), p + Vector2(22, 62)]), COLORS[2].darkened(0.3 + i * 0.06))
-				pixel_circle(p + Vector2(0, -31), 9, Color("161b2a"))
-	for i in range(12):
-		var p = center + Vector2(sin(i * 7.1 + time * 0.15) * 145, cos(i * 4.3 + time * 0.2) * 134)
-		draw_rect(Rect2(p.snapped(Vector2(3, 3)), Vector2(3, 3)), Color(tint, 0.65))
+	EventPresentation.draw_scene(self, r, event_id)
+
+func record_event_feedback(previous_hp: Array, previous_owned: Array) -> void:
+	event_feedback = []
+	for h in range(3):
+		var hp_delta: int = trip_hp[h] - previous_hp[h]
+		if hp_delta != 0: event_feedback.append({"kind":"hp", "hero":h, "value":hp_delta})
+		for face in range(1, 12):
+			var delta: int = owned_faces[h][face] - previous_owned[h][face]
+			if delta != 0: event_feedback.append({"kind":"face" if delta > 0 else "face_loss", "hero":h, "face":face, "value":delta})
+		var curse_delta: int = owned_faces[h][12] - previous_owned[h][12]
+		if curse_delta != 0: event_feedback.append({"kind":"curse" if curse_delta > 0 else "cleanse", "hero":h, "value":curse_delta})
+	if event_feedback.is_empty(): event_feedback.append({"kind":"safe", "hero":event_target, "value":0})
+	event_reveal_elapsed = 0.0
+	var harmful = event_feedback.any(func(change): return change.kind in ["hp", "curse", "face_loss"])
+	sfx("event_bad" if harmful else "event_good")
 
 func blank_step_enabled() -> bool:
 	return reward or blank_step_test

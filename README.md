@@ -97,3 +97,11 @@ The persistent **TEST BLANK STEP: OFF / ON** switch is visible at the top of eve
 Shortcuts: **1/2/3** select a card; **Enter** confirms an immediate ability or a declared boss attack; **Space** resolves the next boss die; **Esc/right-click** cancel a free selection. The browser loading screen is now branded and retains the real engine progress indicator.
 
 `tests/test_blank_step.gd` verifies the toggle, per-hero turn limits, toggling exploit prevention, earned Soul interaction, Cursed Blanks, enlarged click coordinates and non-overlapping ability panels. The browser test checks actual preference persistence across reload and fullscreen entry/exit.
+
+## v0.5 — illustrated event dioramas
+
+Each event now has its own large pixel-art environment and transparent NPC sprite: the Grave Bellkeeper, Iron Stitcher, Moth Ferryman, Orchard Warden, Hospice Sister and Hollow Guide. The three heroes have matching story sprites and portrait selectors. These original assets were generated for this project and live in `assets/events/`; battle sprites remain the compact procedural versions.
+
+Scenes include idle motion, moth wings, ash, sparks and spectral motes. Resolving a choice reveals exact consequence chips from the actual before/after state, with a flying reward card, wound flashes and HP text, curse wisps, cleansing effects and a short audio sting. A risk die settles on the already-rolled result; presentation never rolls again. Cost/reward badges and full printed choice text remain visible before commitment.
+
+The outcome is applied and saved once before its reveal plays. Existing saves still retain their outcomes; older outcomes without structured visual metadata show the saved consequence text instead of inventing new rewards. The continue button becomes available after the first brief reveal beat. `tests/test_event_presentation.gd` checks atlas bounds/transparency, all choices' visual deltas, save compatibility and separation between animation and gameplay.

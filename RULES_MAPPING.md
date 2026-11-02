@@ -2,6 +2,12 @@
 
 The uploaded documents are game-design reference material. Their editorial instructions, historical approval language, and undecided concepts were not treated as instructions to operate this workspace.
 
+## v0.6 default Adventure rules
+
+Adventure deliberately changes the document-derived rules with the user’s authorization. [CHANGELOG.md](CHANGELOG.md) lists the exact new values and boss patterns. It adds free Move 2, one Blank reforge per turn, a roll safeguard, stronger strikes/guard/healing, flanking, 1 turn-start Block, closer deployment and fixed hero-first order. The Bell Tyrant has 24 HP, two phases, telegraphed Ruin zones and automatic actions. Phase changes affect patterns and damage from the next shared roll. Matching event rewards can replace corresponding unlocked starter faces before the current battle; other rewards remain inventory. Blank-step defaults on for new saves. Existing preferences and ownership survive migration.
+
+All original numerical rules and timing descriptions below describe **Classic**, selectable on the title screen, unless a later section explicitly overrides them.
+
 ## Implemented first encounter
 
 - Three heroes, each 6 HP, three mixed customizable d6 Action Dice; empty Memory; Broken Body with separate Movement/Defense/Skill caps of three.

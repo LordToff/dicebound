@@ -19,6 +19,8 @@ async def main():
   await page.wait_for_function("document.getElementById('status') === null",timeout=60000)
   await page.wait_for_timeout(1000)
   await page.mouse.click(952,42)
+  await page.wait_for_timeout(200)
+  await page.mouse.click(952,42)
   await page.wait_for_timeout(1500)
   await page.reload(wait_until='load')
   await page.wait_for_function("document.getElementById('status') === null",timeout=60000)

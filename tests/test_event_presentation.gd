@@ -2,6 +2,8 @@ extends "res://tests/test_events.gd"
 ## Presentation assets and saved feedback must agree with real event consequences.
 func run() -> void:
 	game = load("res://main.tscn").instantiate()
+	game.adventure = false
+	game.blank_step_test = false
 	game.save_enabled = false; game.sound_on = false
 	root.add_child(game)
 	await process_frame

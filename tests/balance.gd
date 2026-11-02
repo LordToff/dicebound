@@ -1,6 +1,8 @@
 extends "res://tests/test_game.gd"
 func run() -> void:
 	game = load("res://main.tscn").instantiate()
+	game.adventure = false
+	game.blank_step_test = false
 	game.save_enabled = false
 	game.sound_on = false
 	root.add_child(game)

@@ -130,7 +130,7 @@ static func feedback_chip(g, rect: Rect2, change: Dictionary) -> void:
 	var icon = "ward"
 	if kind == "face":
 		title = "+%d %s" % [change.value, g.SHORT_NAMES[change.face]]
-		caption = "OWNED / EQUIP NEXT PREP"
+		caption = "READY / EQUIPPED" if change.get("equipped",false) else "OWNED / EQUIP NEXT PREP"
 		icon = face_symbol(change.face)
 	elif kind == "hp":
 		color = g.RED; icon = "hp"

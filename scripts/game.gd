@@ -58,8 +58,16 @@ var music: AudioStreamPlayer
 var help_open = false
 var hover_tip = ""
 var victory = false
+var adventure = true
+var boss_phase = 1
+var round_boss_phase = 1
+var danger_cells: Array = []
+var boss_clock = 0.0
+var free_move_used = false
+var reforge_used = false
+var free_move_active = false
 var reward = false
-var blank_step_test = false
+var blank_step_test = true
 var battles_won = 0
 var anim_lock = false
 var effects: Array = []
@@ -85,7 +93,7 @@ var pool_page = 0
 var hurt_timers = {}
 const POWER = ["NO ACTION", "1 DAMAGE", "MOVE 1", "MOVE 3", "+1 BLOCK", "BLOCK + STEP", "REROLL 1", "+1 HP", "PUSH 1", "2 DAMAGE", "+2 BLOCK", "MOVE 2", "LOCKED BLANK"]
 const SHORT_NAMES = ["Blank", "Basic Strike", "Step", "Tactical Dash", "Guard", "Tactical Defense", "Focus", "First Aid", "Shove", "Lantern Cut", "Iron Ward", "Pilgrim Step", "Cursed Blank"]
-const BOSS_TIPS = {"Advance":"Move up to 2 toward the closest hero.", "Skirmish":"Move 1, then attack an adjacent hero for 1.", "Strike":"2 damage to the closest adjacent hero.", "Sweep":"1 damage to EVERY adjacent hero, including Downed.", "Brace":"Gain 2 Block until the next boss turn.", "Drive Back":"1 damage, then push 1. Collisions deal 1 + Stunned.", "Distort":"Closest hero within 2: Weakness 1 until boss next turn.", "Fracture":"An adjacent hero chooses an ability face to lose temporarily."}
+const BOSS_TIPS = {"Advance":"Move up to 2 toward the closest hero.", "Skirmish":"Move 1, then attack an adjacent hero for 1.", "Strike":"2 damage to the closest adjacent hero.", "Sweep":"1 damage to EVERY adjacent hero, including Downed.", "Brace":"Gain 2 Block until the next boss turn.", "Drive Back":"1 damage, then push 1. Collisions deal 1 + Stunned.", "Distort":"Closest hero within 2: Weakness 1 until boss next turn.", "Rest":"A recovery beat: the boss takes no action.", "Ruin":"The marked red cross explodes for 2 damage, or 3 in phase two. Move out before the boss acts.", "Fracture":"An adjacent hero chooses an ability face to lose temporarily."}
 
 func _ready() -> void:
 	font = load("res://assets/pixel-mono.ttf")
@@ -117,7 +125,8 @@ func load_progress() -> void:
 	blank_min = int(config.get_value("party", "blanks", 3))
 	if blank_min not in [2, 3]: blank_min = 3
 	reward = bool(config.get_value("party", "reward", false))
-	blank_step_test = bool(config.get_value("settings", "blank_step_test", false))
+	adventure = bool(config.get_value("settings", "adventure", true))
+	blank_step_test = bool(config.get_value("settings", "blank_step_test", adventure))
 	battles_won = int(config.get_value("party", "wins", 0))
 	load_journey(config)
 
@@ -129,6 +138,7 @@ func save_progress() -> void:
 	config.set_value("party", "reward", reward)
 	config.set_value("party", "wins", battles_won)
 	config.set_value("settings", "blank_step_test", blank_step_test)
+	config.set_value("settings", "adventure", adventure)
 	write_journey(config)
 	config.save("user://dicebound.cfg")
 
@@ -156,6 +166,11 @@ func sfx(kind: String) -> void:
 
 func _process(delta: float) -> void:
 	time += delta
+	if adventure and screen == "battle" and phase == "boss" and not help_open:
+		boss_clock += delta
+		if boss_clock >= 0.65:
+			boss_clock = 0.0
+			advance_boss_ai()
 	if screen == "event":
 		event_scene_elapsed += delta
 		if journey_stage == "resolved": event_reveal_elapsed = minf(3.0, event_reveal_elapsed + delta)
@@ -233,7 +248,7 @@ func _draw() -> void:
 	elif screen == "event":
 		draw_event()
 	button(Rect2(740, 27, 74, 30), "EXIT" if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN else "FULL", "fullscreen", true, MUTED, "Toggle fullscreen for a larger view of the arena.")
-	button(Rect2(827, 27, 258, 30), "TEST BLANK STEP: " + ("ON" if blank_step_test else "OFF"), "blank_step_toggle", true, TEAL if blank_step_test else MUTED, "Test rule: spend one rolled Blank to Move 1, once per hero turn. Earned Souls still work when this is off.")
+	button(Rect2(827, 27, 258, 30), "BLANK = MOVE 1: " + ("ON" if blank_step_test else "OFF"), "blank_step_toggle", true, TEAL if blank_step_test else MUTED, "Test rule: spend one rolled Blank to Move 1, once per hero turn. Earned Souls still work when this is off.")
 	if screen != "title":
 		button(Rect2(1100, 27, 64, 30), "RULES", "help", true, MUTED)
 	button(Rect2(1176, 27, 74, 30), "SOUND" if sound_on else "MUTED", "sound", true, MUTED, "Toggle the soundtrack and sound effects.")
@@ -298,11 +313,11 @@ func draw_title() -> void:
 	text_at(Vector2(76, 267), "THE HOLLOW TRIBUNAL", 23, GOLD)
 	draw_rect(Rect2(77, 296, 480, 2), EDGE)
 	wrapped(Vector2(78, 338), "Three fractured souls. Eighteen carved faces. One creature that remembers what you were.", 43, MUTED, 18)
-	button(Rect2(78, 452, 360, 58), "CARVE YOUR DICE  >", "build", true, GOLD)
+	button(Rect2(78, 452, 360, 58), "PREPARE YOUR PARTY  >", "build", true, GOLD)
 	button(Rect2(78, 526, 174, 44), "HOW TO PLAY", "help", true, MUTED)
 	button(Rect2(266, 526, 172, 44), "NEW JOURNEY", "quick", true, TEAL)
 	button(Rect2(78, 590, 360, 36), "CAMP / TEST SIX EVENTS", "camp", true, COLORS[2])
-	text_at(Vector2(78, 647), "BUILD / ROLL / POSITION / SURVIVE", 15, MUTED)
+	button(Rect2(78,637,360,27), "RULESET: " + ("ADVENTURE" if adventure else "CLASSIC PROTOTYPE"),"ruleset",true,GOLD)
 	text_at(Vector2(78, 679), "16-BIT ORIGINAL ART  +  PROCEDURAL CHIP AUDIO", 12, MUTED.darkened(0.15))
 	text_at(Vector2(78, 761), "LOCAL THREE-HERO PLAY   ·   BASED ON YOUR OCT 31 RULES", 13, MUTED)
 
@@ -392,7 +407,7 @@ func draw_build() -> void:
 		var enabled = capacity > 0 and (count < capacity or capacity == 1 or builds[builder][build_slot] == f)
 		box(r, color.darkened(0.86), GOLD if paint_face == f else color.darkened(0.4))
 		text_at(r.position + Vector2(10, 19), SHORT_NAMES[f], 13, INK if enabled else MUTED)
-		text_at(r.position + Vector2(10, 43), POWER[f], 13, color)
+		text_at(r.position + Vector2(10, 43), ("2 DAMAGE" if f == 1 else ("+2 BLOCK" if f == 4 else ("+2 HP" if f == 7 else ("3 DAMAGE" if f == 9 else ("+3 BLOCK" if f == 10 else POWER[f]))))) if adventure else POWER[f], 13, color)
 		text_at(r.position + Vector2(144, 56), "%d/%d" % [count, capacity], 10, MUTED)
 		if enabled: hits.append({"r": r, "id": "paint:%d" % f})
 		if r.has_point(get_local_mouse_position()): hover_tip = FACES[f] + ": " + DESCS[f]
@@ -482,7 +497,10 @@ func start_battle() -> void:
 	if preserve_event: journey_stage = "battle"
 	save_progress()
 	screen = "battle"
-	boss = {"pos": Vector2i(3, 2), "hp": 18, "block": 0}
+	boss = {"pos": Vector2i(3, 2), "hp": 24 if adventure else 18, "block": 0}
+	boss_phase = 1
+	boss_clock = 0
+	danger_cells.clear()
 	heroes.clear()
 	log_lines.clear()
 	initiative.clear()
@@ -490,16 +508,17 @@ func start_battle() -> void:
 	recovery.clear()
 	recovery_active = false
 	for h in range(3):
-		heroes.append({"pos": Vector2i(2 + h * 2, 6), "hp": trip_hp[h] if preserve_event else 6, "block": 0, "down": false, "dead": false, "broken": false, "protected": false, "weak": false, "stun": false, "dice": builds[h].duplicate(), "roll": [], "spent": [false, false, false], "react": [], "acted": false, "soul_used": false})
+		heroes.append({"pos": Vector2i(2 + h * 2, 4 if adventure else 6), "hp": trip_hp[h] if preserve_event else 6, "block": 0, "down": false, "dead": false, "broken": false, "protected": false, "weak": false, "stun": false, "dice": builds[h].duplicate(), "roll": [], "spent": [false, false, false], "react": [], "acted": false, "soul_used": false})
 		initiative.append(rng.randi_range(1, 6))
 	initiative.append(rng.randi_range(1, 6))
 	order = [0, 1, 2, 3]
 	order.sort_custom(func(a, b): return initiative[a] > initiative[b] if initiative[a] != initiative[b] else (a == 3 or (b != 3 and a < b)))
+	if adventure: order = [0, 1, 2, 3]
 	round_no = 0
 	selected = -1
 	mode = ""
 	anim_lock = false
-	say("The Hollow One stirs. Initiative is fixed.")
+	say("The Bell Tyrant awakens. Your party acts first." if adventure else "The Hollow One stirs. Initiative is fixed.")
 	new_round()
 
 func roll_hero(h: int) -> void:
@@ -513,6 +532,17 @@ func roll_hero(h: int) -> void:
 		if u.dice[d * 6 + side] == 5 and not u.down and not u.dead:
 			u.react.append(d)
 			u.spent[d] = true
+	if adventure and not u.down and not u.dead :
+		var useful = false
+		for d in range(3):
+			if u.dice[d * 6 + u.roll[d]] not in [0, 12]: useful = true
+		if not useful:
+			for slot in range(18):
+				if u.dice[slot] not in [0, 12]:
+					var d = slot / 6
+					u.roll[d] = slot % 6
+					if u.dice[slot] == 5: u.react.append(d); u.spent[d] = true
+					break
 	if u.down or u.dead: u.spent = [true, true, true]
 
 func new_round() -> void:
@@ -525,6 +555,16 @@ func new_round() -> void:
 		roll_hero(h)
 	boss_roll.clear()
 	for d in range(3): boss_roll.append(BOSS_DICE[d][rng.randi_range(0, 5)])
+	if adventure:
+		round_boss_phase = boss_phase
+		boss_roll = (["Advance", "Ruin", "Rest"] if round_no % 2 else ["Skirmish", "Strike", "Rest"]) if boss_phase == 1 else (["Advance", "Ruin", "Sweep"] if round_no % 2 else ["Skirmish", "Strike", "Ruin"])
+		danger_cells.clear()
+		if "Ruin" in boss_roll:
+			var target = closest(eligible(100))
+			if target >= 0:
+				for y in range(9):
+					for x in range(9):
+						if distance(Vector2i(x,y), heroes[target].pos) <= 1: danger_cells.append(Vector2i(x,y))
 	say("ROUND %d / all Action Dice rolled openly." % round_no)
 	sfx("roll")
 	next_turn()
@@ -532,6 +572,10 @@ func new_round() -> void:
 func next_turn() -> void:
 	armed_die = -1
 	end_confirm = false
+	free_move_active = false
+	free_move_used = false
+	reforge_used = false
+	boss_clock = 0
 	if check_end(): return
 	selected = -1
 	mode = ""
@@ -557,10 +601,10 @@ func next_turn() -> void:
 		for u in heroes: u.weak = false
 		boss_step = 0
 		phase = "boss"
-		say("The Hollow One activates. Resolve I > II > III.")
+		say("The Bell Tyrant acts. Watch the marked ground." if adventure else "The Hollow One activates. Resolve I > II > III.")
 	else:
 		var u: Dictionary = heroes[active]
-		u.block = 0
+		u.block = 1 if adventure else 0
 		u.soul_used = false
 		phase = "hero"
 		if u.stun:
@@ -687,7 +731,7 @@ func select_die(d: int) -> void:
 			mode = "move"
 			reachable = movement_options(active, 3 if face == 3 else (2 if face == 11 else 1), face == 3)
 		4, 10:
-			var gained = 2 if face == 10 else 1
+			var gained = (3 if face == 10 else 2) if adventure else (2 if face == 10 else 1)
 			u.block += gained
 			float_text(active, "+%d BLOCK" % gained, COLORS[0])
 			emit(unit_center(active), COLORS[0], 22)
@@ -737,6 +781,13 @@ func board_click(p: Vector2i) -> void:
 				return
 		return
 	if phase != "hero" or active >= 3: return
+	if free_move_active:
+		if reachable.has(p):
+			move_unit(active, p)
+			free_move_used = true
+			free_move_active = false
+			mode = ""; reachable.clear()
+		return
 	var target = unit_at(p)
 	if mode in ["move", "move_soul"]:
 		if reachable.has(p):
@@ -803,12 +854,16 @@ func damage(target: int, amount: int, unavoidable: bool = false) -> void:
 					u.react.clear()
 					u.spent = [true, true, true]
 					say(NAMES[target] + " is Downed. First Aid can recover them.")
+	if adventure and target == 3 and boss.hp > 0 and boss.hp <= 12 and boss_phase == 1:
+		boss_phase = 2
+		notify("THE BELL TYRANT ENRAGES! Next round: three attacks. Watch the red tiles.")
+		emit(unit_center(3), RED, 45)
 	check_end()
 
 func heal(h: int) -> void:
 	var u: Dictionary = heroes[h]
 	if u.dead: return
-	var gained = mini(1, 6 - u.hp)
+	var gained = mini(2 if adventure else 1, 6 - u.hp)
 	u.hp += gained
 	if u.down and gained > 0:
 		u.down = false
@@ -865,6 +920,16 @@ func resolve_boss() -> void:
 	pending = {"action": action, "reacted": []}
 	say("Boss die %s: %s." % [["I", "II", "III"][boss_step], action])
 	match action:
+		"Rest":
+			say("The Tyrant catches its breath. Make the next round count.")
+			boss_complete()
+		"Ruin":
+			for h in range(3):
+				if not heroes[h].dead and heroes[h].pos in danger_cells:
+					damage(h, 3 if round_boss_phase == 2 else 2)
+					if screen != "battle": return
+			danger_cells.clear()
+			boss_complete()
 		"Advance", "Skirmish": offer_boss_move(2 if action == "Advance" else 1, action)
 		"Brace":
 			boss.block += 2
@@ -977,7 +1042,7 @@ func execute_attack() -> void:
 		prepare_attack(action)
 		return
 	for h in legal:
-		damage(h, 2 if action == "Strike" else 1)
+		damage(h, (3 if action == "Strike" else 2) if adventure and round_boss_phase == 2 else (2 if action == "Strike" else 1))
 		if screen != "battle": return
 	if action == "Drive Back" and not legal.is_empty():
 		choose_push(3, legal[0], true, true)
@@ -1031,18 +1096,18 @@ func draw_battle() -> void:
 		elif f == 7: visual_mode = "heal"
 		elif f == 8: visual_mode = "shove"
 	text_at(Vector2(40, 44), "DICEBOUND", 24, GOLD)
-	text_at(Vector2(248, 43), "THE HOLLOW TRIBUNAL / v0.5", 13, MUTED)
+	text_at(Vector2(248, 43), "THE HOLLOW TRIBUNAL / v0.6", 13, MUTED)
 	text_at(Vector2(556, 43), "ROUND %02d" % round_no, 14, GOLD)
 	for i in range(4):
 		var h: int = order[i]
 		var x = 712 + i * 134
 		var color: Color = RED if h == 3 else COLORS[h]
 		box(Rect2(x, 65, 126, 29), color.darkened(0.85), GOLD if active == h else EDGE)
-		text_at(Vector2(x + 7, 84), ("HOLLOW" if h == 3 else NAMES[h]) + " [%d]" % initiative[h], 11, color)
-	text_at(Vector2(40, 80), "THE HOLLOW ONE", 16, RED)
+		text_at(Vector2(x + 7, 84), (("TYRANT" if adventure else "HOLLOW") if h == 3 else NAMES[h]) + (" / %d" % (i + 1) if adventure else " [%d]" % initiative[h]), 11, color)
+	text_at(Vector2(40, 80), "BELL TYRANT / PHASE %d" % boss_phase if adventure else "THE HOLLOW ONE", 15, RED)
 	text_at(Vector2(278, 80), "BLOCK %d" % boss.block, 12, COLORS[0])
-	text_at(Vector2(557, 80), "%02d / 18 HP" % boss.hp, 14, INK)
-	for n in range(18): draw_rect(Rect2(40 + n * 35, 88, 32, 7), RED if n < boss.hp else Color("332636"))
+	text_at(Vector2(557, 80), "%02d / %d HP" % [boss.hp, 24 if adventure else 18], 14, INK)
+	for n in range(18): draw_rect(Rect2(40 + n * 35, 88, 32, 7), RED if n < ceili(boss.hp * 18.0 / (24 if adventure else 18)) else Color("332636"))
 	var offset = Vector2(sin(time * 110), cos(time * 90)) * shake
 	box(Rect2(BOARD - Vector2(5, 5), Vector2.ONE * CELL * 9 + Vector2(8, 8)), Color("141925"), Color("514151"))
 	for torch_pos in [BOARD + Vector2(-18, 12), BOARD + Vector2(CELL * 9 + 16, 12), BOARD + Vector2(-18, CELL * 9 - 12), BOARD + Vector2(CELL * 9 + 16, CELL * 9 - 12)]:
@@ -1057,6 +1122,10 @@ func draw_battle() -> void:
 			var r = Rect2(BOARD + Vector2(p) * CELL + offset, Vector2.ONE * (CELL - 2))
 			var color = Color("282d3d") if (x + y) % 2 else Color("30374a")
 			draw_rect(r, color)
+			if adventure and p in danger_cells:
+				draw_rect(r, Color(0.95,0.15,0.2,0.22 + sin(time*5)*0.07))
+				draw_rect(r.grow(-4), RED, false, 2)
+				text_at(r.position + Vector2(27,45), "!", 23, RED)
 			draw_rect(Rect2(r.position + Vector2(3, 3), Vector2(CELL - 8, 1)), color.lightened(0.09))
 			if (x * 13 + y * 7) % 11 == 0: draw_line(r.position + Vector2(12, 6), r.position + Vector2(18, 19), color.darkened(0.3), 2)
 			if display_reachable.has(p):
@@ -1084,7 +1153,11 @@ func draw_battle() -> void:
 	var br = Rect2(BOARD + Vector2(boss.pos) * CELL + offset + Vector2(2, 2), Vector2.ONE * (CELL * 2 - 6))
 	draw_rect(br, Color(0.60, 0.23, 0.32, 0.18))
 	draw_rect(br, RED.darkened(0.3), false, 2)
-	draw_boss(bc + Vector2(0, sin(time * 2) * 2), 2)
+	if adventure:
+		var source = EventPresentation.atlas_region(EventPresentation.NPCS, 0)
+		source.position.x += source.size.x * 0.25; source.size.x *= 0.70
+		draw_texture_rect_region(EventPresentation.NPCS, Rect2(bc - Vector2(66,70),Vector2(132,140)),source,Color(1,0.75,0.75) if boss_phase == 2 else Color.WHITE)
+	else: draw_boss(bc + Vector2(0, sin(time * 2) * 2), 2)
 	if hurt_timers.get(3, 0.0) > 0: draw_rect(br, Color(1, 0.4, 0.4, hurt_timers[3] * 0.7))
 	for h in range(3):
 		var u: Dictionary = heroes[h]
@@ -1093,12 +1166,13 @@ func draw_battle() -> void:
 		if active == h:
 			draw_rect(Rect2(center - Vector2(32, 32), Vector2(64, 64)), COLORS[h], false, 2)
 			draw_rect(Rect2(center - Vector2(32, 32), Vector2(5, 5)), GOLD)
-		draw_hero(center + Vector2(0, sin(time * 2.5 + h) * 1.5), h, 2, u.down)
+		if adventure and not u.down: EventPresentation.draw_hero_sprite(self, center + Vector2(0,27),h,70,1.0)
+		else: draw_hero(center + Vector2(0, sin(time * 2.5 + h) * 1.5), h, 2, u.down)
 		if hurt_timers.get(h, 0.0) > 0: draw_rect(Rect2(center - Vector2(24, 32), Vector2(48, 57)), Color(1, 0.7, 0.6, hurt_timers[h]))
 		for n in range(6): draw_rect(Rect2(center + Vector2(-27 + n * 9, 29), Vector2(7, 4)), COLORS[h] if n < u.hp else Color("191b28"))
 		if u.block > 0: text_at(center + Vector2(22, -23), str(u.block), 14, COLORS[0])
 		if not u.react.is_empty(): text_at(center + Vector2(-29, -24), "!", 18, GOLD)
-	box(Rect2(710, 108, 538, 503))
+	box(Rect2(710, 108, 538, 516))
 	text_at(Vector2(724, 131), "BOSS INTENTIONS / HOVER FOR DETAILS", 11, MUTED)
 	for d in range(3):
 		var x = 724 + d * 172
@@ -1108,7 +1182,10 @@ func draw_battle() -> void:
 		text_at(Vector2(x + 9, 184), boss_roll[d], 13, RED)
 		if r.has_point(get_local_mouse_position()): hover_tip = BOSS_TIPS.get(boss_roll[d], "")
 	if active < 3: draw_hero_console()
-	else: draw_boss_console()
+	if adventure and active < 3:
+		button(Rect2(724,598,245,25), "MOVE 2 [M]" if not free_move_used else "MOVE USED", "free_move", not free_move_used, TEAL)
+		button(Rect2(982,598,252,25), "REFORGE BLANKS [R]" if not reforge_used else "REFORGE USED", "reforge", not reforge_used, GOLD)
+	if active == 3: draw_boss_console()
 	if mode == "push_direction":
 		for i in range(pending.choices.size()):
 			var choice: Dictionary = pending.choices[i]
@@ -1131,7 +1208,7 @@ func draw_battle() -> void:
 	for i in range(mini(3, log_lines.size())): text_at(Vector2(724, 731 + i * 17), str(log_lines[i]).left(73), 11, MUTED)
 
 func draw_boss_console() -> void:
-	text_at(Vector2(724, 229), "THE HOLLOW ONE / ACTIVATION", 18, RED)
+	text_at(Vector2(724, 229), "BELL TYRANT / ACTIVATION" if adventure else "THE HOLLOW ONE / ACTIVATION", 18, RED)
 	var instruction = "Resolve I, II, III in order. Space continues."
 	match mode:
 		"boss_move": instruction = "Choose a highlighted boss destination, or let the route helper choose."
@@ -1184,6 +1261,8 @@ func draw_help() -> void:
 	box(Rect2(145, 65, 990, 670), PANEL, GOLD)
 	text_at(Vector2(176, 111), "THE FIELD GUIDE", 28, GOLD)
 	var lines = ["01  BUILD: three mixed six-sided dice per hero. Own copies matter.", "    Original Soul: at least 3 Blanks per die. Body caps: M3 / D3 / S3.", "02  ROLL: everyone rolls together each round. Initiative stays fixed.", "03  ACT: click a die, then a highlighted square or legal target.", "    Basic Strike = 1 damage. First Aid = 1 heal. No Numeric rolls.", "04  POSITION: orthogonal movement. FULL expands the browser view.", "    Boss: 2 x 2 squares. Tactical Movement: up to 3 straight.", "05  REACT: Tactical Defense stores automatically. Gain 1 Block and", "    optionally step when attacked. Unused Reactions expire next roll.", "06  SURVIVE: Block absorbs damage, expires at your own turn start.", "    At 0 HP: Downed. First Aid revives with Broken + a recovery turn.", "    A Broken hero reaching 0 dies. All Downed/dead = immediate loss.", "07  BOSS: resolve I, II, III. You choose legal routes, push directions", "    and the face lost to Fracture. Enemy intentions are public.", "08  WIN: reduce the boss's 18 HP to zero. Earn a Bound Move-1 Soul.", "", "CONTROLS  Mouse: select/use   1/2/3: dice   E: end turn   Esc: cancel/help", "", "One local player controls all three heroes. Hero ties use roster order.", "JOURNEY: prepare, resolve an event, then fight with its injuries.", "TEST BLANK STEP above: spend one Blank to Move 1 per hero turn."]
+	if adventure:
+		lines = ["ADVENTURE / FASTER TACTICAL RUNS", "", "1. Prepare a legal build, then choose an event before the fight.", "2. Matching reward upgrades equip immediately. Wounds carry in.", "3. Heroes act first. Read the boss intentions and RED danger tiles.", "4. Each hero gets FREE MOVE 2 [M] and one REFORGE BLANKS [R].", "5. Strike deals 2; Lantern Cut 3. Opposite-side flanking adds 1.", "6. Guard gives 2 Block; Iron Ward 3. First Aid heals 2.", "7. Click an attack next to the boss to strike immediately.", "8. Ruin hits its marked cross. Leave it before the boss acts!", "9. At half HP the Tyrant enrages; the NEXT round gets harder.", "10. Reactions pause automatic boss resolution for your choice.", "", "1/2/3 abilities / M move / R reforge / E end turn", "Escape or right-click cancels an uncommitted selection.", "", "The title-screen ruleset button retains the Classic prototype."]
 	for i in range(lines.size()): text_at(Vector2(177, 152 + i * 24), lines[i], 14, MUTED if i > 16 else INK)
 	button(Rect2(853, 677, 245, 39), "BACK TO THE FIRE", "help", true, GOLD)
 
@@ -1220,12 +1299,16 @@ func _gui_input(event: InputEvent) -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_ESCAPE:
+		if event.keycode == KEY_ESCAPE and free_move_active:
+			handle("cancel_ability")
+		elif event.keycode == KEY_ESCAPE:
 			if screen == "battle" and phase == "hero" and not help_open and (end_confirm or selected >= 0) and mode not in ["focus", "stun", "push_direction"]:
 				handle("cancel_ability")
 			else: help_open = not help_open
 		elif not help_open and screen == "battle":
 			if event.keycode in [KEY_1, KEY_2, KEY_3]: choose_ability(event.keycode - KEY_1)
+			if event.keycode == KEY_M: handle("free_move")
+			if event.keycode == KEY_R: handle("reforge")
 			if event.keycode == KEY_E and phase == "hero" and mode != "stun": request_end_turn()
 			if event.keycode == KEY_ENTER:
 				if mode == "confirm" and armed_die >= 0: handle("activate")
@@ -1241,6 +1324,26 @@ func _exit_tree() -> void:
 		music.stream = null
 
 func handle(id: String) -> void:
+	if id == "free_move":
+		if adventure and active < 3 and phase == "hero" and not free_move_used and mode not in ["focus", "stun", "push_direction"]:
+			selected = -1; armed_die = -1
+			free_move_active = true; mode = "move"
+			reachable = movement_options(active, 2)
+		return
+	if id == "reforge":
+		if adventure and active < 3 and phase == "hero" and not reforge_used and mode not in ["focus", "stun", "push_direction"]:
+			reforge_used = true
+			for d in unresolved(active):
+				if heroes[active].dice[d * 6 + heroes[active].roll[d]] in [0, 12]:
+					heroes[active].roll[d] = rng.randi_range(0,5)
+					if heroes[active].dice[d * 6 + heroes[active].roll[d]] == 5: heroes[active].react.append(d); heroes[active].spent[d] = true
+			selected = -1; mode = ""; free_move_active = false; reachable.clear(); sfx("roll")
+		return
+	if id == "ruleset":
+		if journey_stage in ["prepare", "aftermath"]:
+			adventure = not adventure; save_progress()
+		else: notify("Finish the committed run before changing its ruleset.")
+		return
 	if id == "blank_step_toggle":
 		blank_step_test = not blank_step_test
 		if not blank_step_enabled() and mode == "move_soul":
@@ -1299,6 +1402,7 @@ func handle(id: String) -> void:
 	elif id == "cancel_ability":
 		armed_die = -1
 		selected = -1
+		free_move_active = false
 		end_confirm = false
 		if mode != "stun": mode = ""
 		reachable.clear()
@@ -1308,7 +1412,10 @@ func handle(id: String) -> void:
 	elif id == "boss_next": resolve_boss()
 	elif id == "auto_move":
 		var cells = reachable.keys()
-		if not cells.is_empty(): board_click(cells[0])
+		if not cells.is_empty():
+			if adventure and pending.has("move_target"):
+				cells.sort_custom(func(a,b): return distance(heroes[pending.move_target].pos,a,2) < distance(heroes[pending.move_target].pos,b,2))
+			board_click(cells[0])
 	elif id == "react": use_reaction()
 	elif id == "decline":
 		pending.reacted.append(pending.reactor)
@@ -1335,6 +1442,11 @@ func handle(id: String) -> void:
 		boss_complete()
 
 func choose_ability(d: int) -> void:
+	if adventure and active < 3 and phase == "hero" and mode not in ["focus", "stun"] and roll_anim <= 0 and not heroes[active].spent[d]:
+		free_move_active = false
+		select_die(d)
+		if mode == "attack" and 3 in legal_ability_targets(heroes[active].dice[d * 6 + heroes[active].roll[d]]): board_click(boss.pos)
+		return
 	if active >= 3 or phase != "hero" or roll_anim > 0: return
 	if mode in ["focus", "stun"]:
 		select_die(d)
@@ -1365,6 +1477,9 @@ func ready_action_count() -> int:
 	return count
 
 func request_end_turn() -> void:
+	if adventure and mode != "stun":
+		finish_turn()
+		return
 	if mode == "stun": return
 	if end_confirm or ready_action_count() == 0: finish_turn()
 	else: end_confirm = true
@@ -1401,6 +1516,9 @@ func draw_ability_card(d: int) -> void:
 	draw_rect(Rect2(r.position, Vector2(4, r.size.y)), color)
 	text_at(r.position + Vector2(13, 23), "[%d] %s" % [d + 1, SHORT_NAMES[f]], 16, INK if not spent else MUTED)
 	var value: String = POWER[f]
+	if adventure and f in [1,9]: value = "%d DAMAGE" % attack_value(active,f)
+	if adventure and f in [4,10]: value = "+%d BLOCK" % (3 if f == 10 else 2)
+	if adventure and f == 7: value = "+2 HP"
 	if f in [1, 9] and u.weak: value = "%d DMG / WEAK" % attack_value(active, f)
 	if f in [0, 12] and blank_step_enabled(): value = "STEP USED" if u.soul_used else "MOVE 1"
 	if roll_anim > 0: value = ". . ."
@@ -1430,6 +1548,10 @@ func draw_hero_console() -> void:
 		button(Rect2(985, 547, 241, 39), "KEEP PLAYING", "cancel_ability", true, TEAL)
 		return
 	if selected < 0:
+		if free_move_active:
+			text_at(Vector2(724,524), "FREE MOVE 2 / CHOOSE A GREEN SQUARE",13,TEAL)
+			text_at(Vector2(724,549), "No die cost. Escape cancels without spending it.",12,MUTED)
+			return
 		text_at(Vector2(724, 524), "CHOOSE AN ABILITY, THEN A HIGHLIGHTED TARGET", 13, GOLD)
 		text_at(Vector2(724, 549), "Hover a card to preview reach. 1 / 2 / 3 select.", 12, MUTED)
 		if mode == "stun": wrapped(Vector2(724, 574), "STUNNED: choose one ready card to set its die aside.", 60, RED, 12)
@@ -1449,7 +1571,7 @@ func draw_hero_console() -> void:
 	text_at(Vector2(724, 519), instruction, 12, GOLD)
 	if mode == "push_direction": return
 	if mode == "confirm":
-		var label = "GAIN %d BLOCK [ENTER]" % (2 if f == 10 else 1) if f in [4, 10] else ("USE FOCUS [ENTER]" if f == 6 else "DISCARD BLANK")
+		var label = "GAIN %d BLOCK [ENTER]" % ((3 if f == 10 else 2) if adventure else (2 if f == 10 else 1)) if f in [4, 10] else ("USE FOCUS [ENTER]" if f == 6 else "DISCARD BLANK")
 		button(Rect2(724, 550, 326, 39), label, "activate", true, face_color(f))
 		button(Rect2(1063, 550, 171, 39), "CANCEL / FREE", "cancel_ability", true, MUTED)
 	elif mode in ["attack", "heal", "shove"]:
@@ -1458,11 +1580,11 @@ func draw_hero_console() -> void:
 		else:
 			for i in range(mini(targets.size(), 3)):
 				var h: int = targets[i]
-				var label = "HOLLOW" if h == 3 else NAMES[h]
+				var label = ("TYRANT" if adventure else "HOLLOW") if h == 3 else NAMES[h]
 				if f in [1, 9]:
 					var unit: Dictionary = boss if h == 3 else heroes[h]
 					label += " -%d HP" % maxi(0, attack_value(active, f) - unit.block)
-				elif f == 7: label += " +%d HP" % mini(1, 6 - heroes[h].hp)
+				elif f == 7: label += " +%d HP" % mini(2 if adventure else 1, 6 - heroes[h].hp)
 				button(Rect2(724 + i * 173, 534, 164, 30), label, "target:%d" % h, true, face_color(f))
 		button(Rect2(724, 574, 245, 25), "CANCEL / FREE", "cancel_ability", true, MUTED)
 		button(Rect2(982, 574, 252, 25), "DISCARD RESULT", "spend", true, MUTED)
@@ -1522,7 +1644,7 @@ func blank_sides(sides: Array) -> int:
 	return sides.count(0) + sides.count(12)
 
 func attack_value(h: int, face: int) -> int:
-	return maxi(0, (2 if face == 9 else 1) - (1 if heroes[h].weak else 0))
+	return maxi(0, ((3 if face == 9 else 2) if adventure else (2 if face == 9 else 1)) + (1 if adventure and is_flanking(h) else 0) - (1 if heroes[h].weak else 0))
 
 func write_journey(config: ConfigFile) -> void:
 	config.set_value("journey", "version", 1)
@@ -1691,7 +1813,7 @@ func event_choice_allowed(choice: int) -> bool:
 
 func grant_event_face(h: int, face: int) -> String:
 	owned_faces[h][face] += 1
-	return NAMES[h] + " permanently owns +1 " + FACES[face] + ". It stays in inventory until the NEXT preparation. "
+	return NAMES[h] + " permanently owns +1 " + FACES[face] + (". Adventure equips a matching upgrade before this fight. " if adventure else ". It stays in inventory until the NEXT preparation. ")
 
 func event_wound(h: int, value: int) -> String:
 	trip_hp[h] -= value
@@ -1763,6 +1885,7 @@ func resolve_event(choice: int) -> void:
 	# Event consequences repair only the affected side; no voluntary post-event swap.
 	event_outcome = outcome
 	record_event_feedback(previous_hp, previous_owned)
+	if adventure: install_event_upgrades()
 	event_pool.erase(current_event)
 	journey_stage = "resolved"
 	event_journal.push_front(JourneyEvents.DATA[current_event].name + ": " + outcome)
@@ -1847,7 +1970,7 @@ func draw_event() -> void:
 		button(Rect2(40, 713, 1200, 42), "CONTINUE TO BATTLE / INJURIES AND CURSES RETAINED", "event_fight", event_reveal_elapsed >= 0.65, GOLD)
 	else:
 		text_at(Vector2(716, 350), "A BARGAIN AWAITS", 20, GOLD)
-		wrapped(Vector2(716, 382), "Choose your hero in the scene. Then choose a bargain below. Wounds are immediate. New faces enter inventory; equip them during your next preparation.", 62, MUTED, 13)
+		wrapped(Vector2(716, 382), "Choose your hero, then a bargain below. Wounds carry into the fight. Adventure auto-equips matching reward upgrades; other rewards stay in inventory.", 62, MUTED, 13)
 		text_at(Vector2(716, 506), "EVENT DIE %d / %d REMAIN AFTER THIS CHOICE" % [event_die, event_pool.size() - 1], 12, MUTED)
 		for choice in range(2):
 			var r = Rect2(40 + choice * 610, 575, 590, 180)
@@ -1866,7 +1989,7 @@ func draw_event() -> void:
 			EventPresentation.symbol(self, r.position + Vector2(555, 24), cost_icon, cost_color, 0.72)
 			text_at(r.position + Vector2(15, 48), badges[0], 11, cost_color)
 			text_at(r.position + Vector2(255, 48), badges[1], 11, TEAL)
-			wrapped(r.position + Vector2(15, 73), option.text, 79, INK if allowed else MUTED, 11)
+			wrapped(r.position + Vector2(15, 73), adventure_choice_text(option.text) if adventure else option.text, 79, INK if allowed else MUTED, 11)
 			button(Rect2(r.position + Vector2(15, 139), Vector2(560, 29)), "CHOOSE THIS BARGAIN" if allowed else "CANNOT PAY / CHOOSE ANOTHER HERO", "event_choice:%d" % choice, allowed, TEAL if choice == 0 else GOLD)
 
 func draw_event_art(r: Rect2, event_id: int) -> void:
@@ -1891,6 +2014,12 @@ func blank_step_enabled() -> bool:
 	return reward or blank_step_test
 
 func face_description(face: int) -> String:
+	if adventure:
+		if face == 1: return "Deal 2 adjacent damage, +1 when flanking. Click to strike an adjacent boss immediately."
+		if face == 9: return "Deal 3 adjacent damage, +1 when flanking."
+		if face == 4: return "Gain 2 Block immediately."
+		if face == 10: return "Gain 3 Block immediately."
+		if face == 7: return "Heal yourself or an adjacent hero for 2 HP."
 	if face in [0, 12] and blank_step_enabled():
 		return ("Locked face; still a Blank. " if face == 12 else "") + "Spend this rolled Blank to Move 1. Once per hero turn, shared by all Blanks. Cost: this die."
 	return DESCS[face]
@@ -1898,3 +2027,38 @@ func face_description(face: int) -> String:
 func board_cell(pos: Vector2) -> Vector2i:
 	if not Rect2(BOARD, Vector2.ONE * CELL * 9).has_point(pos): return Vector2i(-1, -1)
 	return Vector2i((pos - BOARD) / CELL)
+
+func is_flanking(h: int) -> bool:
+	var p: Vector2i = heroes[h].pos
+	for other in range(3):
+		if other == h or heroes[other].down or heroes[other].dead: continue
+		var q: Vector2i = heroes[other].pos
+		if distance(p,boss.pos,2) != 1 or distance(q,boss.pos,2) != 1: continue
+		if (p.x < boss.pos.x and q.x > boss.pos.x+1) or (q.x < boss.pos.x and p.x > boss.pos.x+1): return true
+		if (p.y < boss.pos.y and q.y > boss.pos.y+1) or (q.y < boss.pos.y and p.y > boss.pos.y+1): return true
+	return false
+
+func advance_boss_ai() -> void:
+	if mode.is_empty(): resolve_boss()
+	elif mode == "boss_move": handle("auto_move")
+	elif mode == "attack_ready": execute_attack()
+	elif mode == "push_direction":
+		var choice = 0
+		for i in range(pending.choices.size()):
+			if free_at(pending.choices[i].dest,pending.target): choice = i; break
+		handle("push:%d" % choice)
+
+func install_event_upgrades() -> void:
+	for change in event_feedback:
+		if change.kind != "face": continue
+		var starters = {9:1,10:4,11:2,7:6}
+		if not starters.has(change.face): continue
+		var h: int = change.hero
+		var slot: int = builds[h].find(starters[change.face])
+		if slot >= 0:
+			builds[h][slot] = change.face
+			change["equipped"] = true
+			event_outcome += " " + FACES[change.face] + " equipped for this fight."
+
+func adventure_choice_text(value: String) -> String:
+	return value.replace("Attack for 2 damage", "Attack for 3 damage").replace("gain 2 Block", "gain 3 Block").replace("for your NEXT preparation", "").replace("for the next preparation", "").replace("for a later preparation", "").replace("not a free die side", "upgrades equip before battle")

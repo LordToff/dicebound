@@ -2,6 +2,10 @@
 
 A playable, 16-bit-style tactical dice-building boss battler made in Godot 4.7, based on the supplied **Master Rules v14 (31 October 2026)** and **Face Catalogue v2 (31 October 2026)**. This prototype now includes the tutorial boss, a persistent journey loop, and six original test events. It does not implement the full extended catalogue or a multi-boss campaign.
 
+## Adventure overhaul — v0.6
+
+[Play in your browser](https://lordtoff.github.io/dicebound/?v=0.6). Adventure is the default ruleset: events before each fight, immediate matching reward upgrades, free Move 2 and Blank reforge each turn, stronger abilities, flanking, and the two-phase Bell Tyrant with marked ground attacks. Boss actions advance automatically and pause for your reactions. Select Classic on the title screen for the original rules described below. See [the full changelog](CHANGELOG.md).
+
 ## Play
 
 **Simplest browser version:** open `Play-Dicebound.html` in a current Chrome or Edge browser. The single HTML file embeds the engine, game, artwork and audio. No installation, extraction, network access or local server is needed. Godot requires a secure browser context; ordinary local HTML files are treated as trustworthy by these browsers.
@@ -17,11 +21,12 @@ Click **Carve Your Dice** to build, or **New Journey** to use the legal starter 
 
 - Mouse: choose dice, targets, movement destinations, boss routes, Fracture losses, and push directions.
 - `1`, `2`, `3`: select a hero's rolled die.
+- `M`: free Move 2 in Adventure. `R`: reforge unused Blanks once per turn.
 - `E`: finish the active hero's turn, declining remaining beneficial results.
 - `Esc` or right-click: cancel an uncommitted selection for free. With no selection, `Esc` opens/closes the field guide.
 - SFX button: mute/unmute both music and effects.
 
-Ordinary actions wait for their owner's initiative activation. Roll results, boss intentions, and stored Reactions are public. The boss does **not** act after each hero. Click **Resolve Die** during its activation and follow the prompts. Tactical Defense is offered at attack declaration, before damage. Gold push-direction buttons also allow selecting off-board collision directions.
+Ordinary actions wait for their owner's initiative activation. Roll results, boss intentions, and stored Reactions are public. The boss does **not** act after each hero. In Classic, click **Resolve Die** during its activation and follow the prompts; Adventure advances the boss automatically. Tactical Defense is offered at attack declaration, before damage. Gold push-direction buttons also allow selecting off-board collision directions.
 
 Builds, the unlocked Bound Soul, owned reward faces, permanent curses, event-pool numbers and committed event outcomes are saved locally. An encounter itself is not saved; restarting a committed encounter retains its event injuries. Browser saves are specific to that site's origin. Victory unlocks the 6-HP, three-Blank reward Soul: once each turn, spend one Action Blank to Move 1. An Alternative-Soul build must be refitted before using that reward. Defeat supports a clean restart without campaign penalties.
 
@@ -39,7 +44,7 @@ godot --path .
 
 Use a Godot 4.7 binary for `godot` in these examples. On the prepared cloud machine it is `/workspace/.godot-dev/tools/4.7/Godot_v4.7-stable_linux.x86_64`. Writable XDG cache/config/data directories are already prepared under `/workspace/.godot-dev`.
 
-Tests cover construction, ownership, fixed initiative, footprint range, occupied-square movement, exact starter effects, protection and recovery, stored Reactions, Fracture, shortest boss routes, collisions, Soul use, and encounter completion. A controlled legal-roll fixture checks a full winning fight; 20 deterministic random fights exercise termination and losing outcomes. These tests establish behavior, not balance. The simple benchmark player loses frequently; the prototype's original numbers remain unchanged for designer playtesting.
+Tests cover construction, ownership, fixed initiative, footprint range, occupied-square movement, exact starter effects, protection and recovery, stored Reactions, Fracture, shortest boss routes, collisions, Soul use, and encounter completion. A controlled legal-roll fixture checks a full winning fight; 20 deterministic random fights exercise termination and losing outcomes. These tests establish behavior, not balance. The Classic benchmark player loses frequently. Adventure has a separate 50-fight regression benchmark in `tests/test_adventure.gd`; neither benchmark replaces human balance testing.
 
 `tests/test_events.gd` exercises every event choice, all risk-die branches, ownership and locks, serialized save/resume, event injury carryover, pool exhaustion and the reward faces in combat. Run it with the same `godot --headless --path . --script res://tests/test_events.gd` pattern.
 
